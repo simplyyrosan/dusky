@@ -2,7 +2,6 @@
 # -----------------------------------------------------------------------------
 # Script: update_tldr.sh
 # Description: Safely updates the tldr cache in an Arch/Hyprland environment.
-# Author: Elite DevOps (AI)
 # Environment: Arch Linux | Bash 5+ | UWSM
 # -----------------------------------------------------------------------------
 
