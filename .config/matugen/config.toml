@@ -109,4 +109,4 @@ post_hook = 'ln -nfs $HOME/.config/matugen/generated/alacritty-colors.toml $HOME
 [templates.waybar]
 input_path = '~/.config/matugen/templates/colors.css'
 output_path = '~/.config/matugen/generated/waybar-colors.css'
-post_hook = 'pkill -SIGUSR2 waybar || true; notify-send "Theme Updated"'
+post_hook = '~/user_scripts/waybar/waybar_autostart.sh || true; notify-send "Theme Updated"'
