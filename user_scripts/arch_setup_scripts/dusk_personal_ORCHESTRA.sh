@@ -40,7 +40,7 @@ INSTALL_SEQUENCE=(
     "U | 024_swww_wallpaper_matugen.sh"
     "U | 025_qtct_config.sh"
     "U | 026_waypaper_config_reset.sh"
-    "U | 027_animation_symlink.sh"
+    "U | 027_animation_default.sh"
     "S | 028_udev_usb_notify.sh"
     "U | 029_terminal_default.sh"
     "S | 030_dusk_fstab.sh"
