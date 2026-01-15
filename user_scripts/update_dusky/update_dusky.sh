@@ -1,145 +1,124 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  ARCH LINUX UPDATE ORCHESTRATOR (v4.5 - Hardened & Optimized)
+#  ARCH LINUX Dusky UPDATE ORCHESTRATOR (v5.3 Battle tested!!!!!!!!!!!!)
 #  Description: Manages dotfile/system updates while preserving user tweaks.
 #  Target:      Arch Linux / Hyprland / UWSM / Bash 5.0+
 #  Repo Type:   Git Bare Repository (--git-dir=~/dusky --work-tree=~)
 # ==============================================================================
 
-# ------------------------------------------------------------------------------
-# 1. ENVIRONMENT VALIDATION & STRICT MODE
-# ------------------------------------------------------------------------------
 set -euo pipefail
-# Ensure 'set -e' propagates to subshells/command substitutions (Bash 4.4+)
-shopt -s inherit_errexit 2>/dev/null || true 
+shopt -s inherit_errexit 2>/dev/null || true
 
 if ((BASH_VERSINFO[0] < 5)); then
     printf 'Error: Bash 5.0+ required (found %s)\n' "$BASH_VERSION" >&2
     exit 1
 fi
 
-# Resolve absolute path to self immediately for reliable re-execution
-declare -r SELF_PATH="$(realpath "$0")"
-
 # ------------------------------------------------------------------------------
-# 2. CONFIGURATION
+# CONFIGURATION
 # ------------------------------------------------------------------------------
-# Paths
 declare -r DOTFILES_GIT_DIR="${HOME}/dusky"
 declare -r WORK_TREE="${HOME}"
 declare -r SCRIPT_DIR="${HOME}/user_scripts/arch_setup_scripts/scripts"
 declare -r LOG_BASE_DIR="${HOME}/Documents/logs"
 declare -r LOCK_FILE="/tmp/arch-orchestrator.lock"
-
-# Remote
 declare -r REPO_URL="https://github.com/dusklinux/dusky"
 declare -r BRANCH="main"
 
-# Binaries - Validate existence immediately
-declare -r GIT_BIN="$(command -v git)" || { printf 'Error: git not found\n' >&2; exit 1; }
-declare -r BASH_BIN="$(command -v bash)" || { printf 'Error: bash not found\n' >&2; exit 1; }
+# Resolve self path with fallbacks
+declare -r SELF_PATH="$(realpath -- "$0" 2>/dev/null || readlink -f -- "$0" 2>/dev/null || echo "$0")"
 
-# Runtime State
-declare    SUDO_PID=""
-declare    STASH_REF=""
-declare    LOG_FILE=""
-declare -a GIT_CMD=()
-declare -a FAILED_SCRIPTS=()
+# Binary validation
+declare GIT_BIN="" BASH_BIN=""
+GIT_BIN="$(command -v git 2>/dev/null)" || true
+BASH_BIN="$(command -v bash 2>/dev/null)" || true
+
+if [[ -z "$GIT_BIN" || ! -x "$GIT_BIN" ]]; then
+    printf 'Error: git not found\n' >&2
+    exit 1
+fi
+if [[ -z "$BASH_BIN" || ! -x "$BASH_BIN" ]]; then
+    printf 'Error: bash not found\n' >&2
+    exit 1
+fi
+declare -r GIT_BIN BASH_BIN
+
+# Runtime state
+declare SUDO_PID="" STASH_REF="" LOG_FILE=""
+declare -a GIT_CMD=() FAILED_SCRIPTS=()
 
 # ------------------------------------------------------------------------------
-# 3. TERMINAL COLORS
+# TERMINAL COLORS
 # ------------------------------------------------------------------------------
 if [[ -t 1 ]]; then
-    declare -r CLR_RED=$'\e[1;31m'
-    declare -r CLR_GRN=$'\e[1;32m'
-    declare -r CLR_YLW=$'\e[1;33m'
-    declare -r CLR_BLU=$'\e[1;34m'
-    declare -r CLR_CYN=$'\e[1;36m'
-    declare -r CLR_BOLD=$'\e[1m'
-    declare -r CLR_RST=$'\e[0m'
+    declare -r CLR_RED=$'\e[1;31m' CLR_GRN=$'\e[1;32m' CLR_YLW=$'\e[1;33m'
+    declare -r CLR_BLU=$'\e[1;34m' CLR_CYN=$'\e[1;36m' CLR_RST=$'\e[0m'
 else
-    declare -r CLR_RED="" CLR_GRN="" CLR_YLW="" CLR_BLU="" CLR_CYN="" CLR_BOLD="" CLR_RST=""
+    declare -r CLR_RED="" CLR_GRN="" CLR_YLW="" CLR_BLU="" CLR_CYN="" CLR_RST=""
 fi
 
 # ------------------------------------------------------------------------------
-# 4. LOGGING SYSTEM
+# LOGGING
 # ------------------------------------------------------------------------------
 setup_logging() {
     local timestamp
     timestamp=$(date +%Y%m%d_%H%M%S)
     
-    # Try to create user log dir, fallback to /tmp if it fails (permissions/readonly)
-    if ! mkdir -p "$LOG_BASE_DIR" 2>/dev/null; then
-        LOG_FILE="/tmp/dusky_update_${timestamp}.log"
-        printf '%s[WARN]%s Could not create %s. Logging to %s\n' "$CLR_YLW" "$CLR_RST" "$LOG_BASE_DIR" "$LOG_FILE"
-    else
+    if mkdir -p "$LOG_BASE_DIR" 2>/dev/null; then
         LOG_FILE="${LOG_BASE_DIR}/dusky_update_${timestamp}.log"
-    fi
-
-    # Ensure log file is writable
-    if ! touch "$LOG_FILE" 2>/dev/null; then
+    else
         LOG_FILE="/tmp/dusky_update_${timestamp}.log"
-        touch "$LOG_FILE" || { printf 'Error: Cannot create log file\n' >&2; exit 1; }
     fi
     
-    # Header for the log file
+    touch "$LOG_FILE" 2>/dev/null || {
+        LOG_FILE="/tmp/dusky_update_${timestamp}.log"
+        touch "$LOG_FILE" || { printf 'Error: Cannot create log\n' >&2; exit 1; }
+    }
+    
     {
         printf '================================================================================\n'
         printf ' DUSKY UPDATE LOG - %s\n' "$timestamp"
-        printf ' Kernel: %s\n' "$(uname -r)"
-        printf ' User:   %s\n' "$USER"
+        printf ' Kernel: %s | User: %s\n' "$(uname -r)" "${USER:-$(id -un)}"
         printf '================================================================================\n'
     } >> "$LOG_FILE"
 }
 
-# Pure Bash ANSI stripping (Faster than spawning sed)
 strip_ansi() {
-    local text="$1"
-    # Remove common ANSI escape sequences
-    while [[ "$text" =~ $'\e'\[[0-9\;]*[a-zA-Z] ]]; do
-        text="${text//${BASH_REMATCH[0]}/}"
+    local text="$1" i=0
+    while [[ "$text" =~ $'\e'\[[0-9\;]*[a-zA-Z] ]] && ((++i < 50)); do
+        text="${text//"${BASH_REMATCH[0]}"/}"
     done
     printf '%s' "$text"
 }
 
 log() {
-    # Validate arguments
-    if (($# < 2)); then
-        printf '[LOG ERROR] log() requires level and message\n' >&2
-        return 1
-    fi
-
-    local -r level="$1"
-    local -r msg="$2"
-    local timestamp
+    (($# >= 2)) || return 1
+    local -r level="$1" msg="$2"
+    local timestamp prefix=""
     timestamp=$(date +%H:%M:%S)
-    local formatted_msg=""
-
+    
     case "$level" in
-        INFO)    formatted_msg=$(printf '%s[INFO]%s   %s' "$CLR_BLU" "$CLR_RST" "$msg") ;;
-        OK)      formatted_msg=$(printf '%s[OK]%s     %s' "$CLR_GRN" "$CLR_RST" "$msg") ;;
-        WARN)    formatted_msg=$(printf '%s[WARN]%s   %s' "$CLR_YLW" "$CLR_RST" "$msg") ;;
-        ERROR)   formatted_msg=$(printf '%s[ERROR]%s  %s' "$CLR_RED" "$CLR_RST" "$msg") ;;
-        SECTION) formatted_msg=$(printf '\n%s═══════ %s %s' "$CLR_CYN" "$msg" "$CLR_RST") ;;
-        RAW)     formatted_msg="$msg" ;; 
-        *)       formatted_msg=$(printf '[%s] %s' "$level" "$msg") ;;
+        INFO)    prefix="${CLR_BLU}[INFO ]${CLR_RST}" ;;
+        OK)      prefix="${CLR_GRN}[OK   ]${CLR_RST}" ;;
+        WARN)    prefix="${CLR_YLW}[WARN ]${CLR_RST}" ;;
+        ERROR)   prefix="${CLR_RED}[ERROR]${CLR_RST}" ;;
+        SECTION) prefix=$'\n'"${CLR_CYN}═══════${CLR_RST}" ;;
+        RAW)     prefix="" ;;
+        *)       prefix="[$level]" ;;
     esac
-
-    # Print to console (stderr for errors, stdout for others)
-    if [[ "$level" == "ERROR" ]]; then
-        printf '%s\n' "$formatted_msg" >&2
+    
+    if [[ "$level" == "RAW" ]]; then
+        printf '%s\n' "$msg"
     else
-        printf '%s\n' "$formatted_msg"
+        printf '%s %s\n' "$prefix" "$msg"
     fi
-
-    # Print to file (strip ANSI codes) - only if LOG_FILE is valid
-    if [[ -n "${LOG_FILE:-}" && -w "$LOG_FILE" ]]; then
-        printf '[%s] [%s] %s\n' "$timestamp" "$level" "$(strip_ansi "$msg")" >> "$LOG_FILE"
-    fi
+    
+    [[ -n "${LOG_FILE:-}" && -w "$LOG_FILE" ]] && \
+        printf '[%s] [%-5s] %s\n' "$timestamp" "$level" "$(strip_ansi "$msg")" >> "$LOG_FILE"
 }
 
 # ------------------------------------------------------------------------------
-# 5. THE PLAYLIST
+# PLAYLIST (sub Scripts)
 # ------------------------------------------------------------------------------
 declare -ra UPDATE_SEQUENCE=(
 #    "U | 000_configure_uwsm_gpu.sh"
@@ -230,387 +209,401 @@ declare -ra UPDATE_SEQUENCE=(
     "U | 085_wayclick_reset.sh"
 )
 
-# ==============================================================================
-#  CORE ENGINE
-# ==============================================================================
-
+# ------------------------------------------------------------------------------
+# CORE ENGINE
+# ------------------------------------------------------------------------------
 trim() {
-    local str="$1"
-    str="${str#"${str%%[![:space:]]*}"}"
-    str="${str%"${str##*[![:space:]]}"}"
-    printf '%s' "$str"
+    local s="$1"
+    s="${s#"${s%%[![:space:]]*}"}"
+    s="${s%"${s##*[![:space:]]}"}"
+    printf '%s' "$s"
 }
 
 cleanup() {
     local -r exit_code=$?
-
-    # Stop Sudo Keepalive
-    if [[ -n "${SUDO_PID:-}" ]] && kill -0 "$SUDO_PID" 2>/dev/null; then
+    
+    # Stop sudo keepalive
+    [[ -n "${SUDO_PID:-}" ]] && kill -0 "$SUDO_PID" 2>/dev/null && {
         kill "$SUDO_PID" 2>/dev/null || true
         wait "$SUDO_PID" 2>/dev/null || true
-    fi
-
-    # Only attempt stash recovery if we have an outstanding stash
+    }
+    
+    # Restore stash if interrupted
     if [[ -n "${STASH_REF:-}" ]] && ((${#GIT_CMD[@]} > 0)); then
         printf '\n'
         log WARN "Interrupted with stashed changes!"
-        log WARN "Attempting automatic recovery..."
-
-        if "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null >> "${LOG_FILE:-/dev/null}" 2>&1; then
-            log OK "Your local modifications have been restored."
+        if "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null; then
+            log OK "Your modifications restored."
         else
-            log ERROR "Automatic recovery failed."
-            log ERROR "Your changes are safely stored. Recover manually with:"
-            printf '    %sgit --git-dir="%s" --work-tree="%s" stash pop%s\n' \
-                   "$CLR_YLW" "$DOTFILES_GIT_DIR" "$WORK_TREE" "$CLR_RST"
+            log ERROR "Restore failed. Recover with:"
+            printf '    git --git-dir="%s" --work-tree="%s" stash pop\n' "$DOTFILES_GIT_DIR" "$WORK_TREE"
         fi
     fi
-
+    
     # Release lock
     exec 9>&- 2>/dev/null || true
     rm -f "$LOCK_FILE" 2>/dev/null || true
-
+    
     printf '\n'
     if ((${#FAILED_SCRIPTS[@]} > 0)); then
-        log WARN "Completed with ${#FAILED_SCRIPTS[@]} failure(s). Check log: ${LOG_FILE:-N/A}"
-        local script
-        for script in "${FAILED_SCRIPTS[@]}"; do
-            printf '    %s•%s %s\n' "$CLR_RED" "$CLR_RST" "$script"
-        done
+        log WARN "Completed with ${#FAILED_SCRIPTS[@]} failure(s)"
+        printf '%s\n' "${FAILED_SCRIPTS[@]}" | sed 's/^/    • /'
     elif [[ -n "${LOG_FILE:-}" ]]; then
-        log OK "Orchestration complete. Log saved to: $LOG_FILE"
+        log OK "Complete. Log: $LOG_FILE"
     fi
-
-    # Function finishes and trap exits with original code
 }
 
-# Trap EXIT and common signals for graceful shutdown
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
 init_sudo() {
     log INFO "Acquiring sudo privileges..."
-
-    if ! sudo -v; then
-        log ERROR "Sudo authentication failed."
-        exit 1
-    fi
-
-    # Robust keepalive with parent process monitoring
-    # If this script (parent) dies, the subshell will exit automatically on next check
-    (
-        trap 'exit 0' TERM
-        while kill -0 $$ 2>/dev/null; do
-            sleep 55
-            sudo -n true 2>/dev/null || exit 0
-        done
+    sudo -v || { log ERROR "Sudo auth failed."; exit 1; }
+    
+    ( trap 'exit 0' TERM
+      while kill -0 $$ 2>/dev/null; do sleep 55; sudo -n true 2>/dev/null || exit 0; done
     ) &
     SUDO_PID=$!
     disown "$SUDO_PID" 2>/dev/null || true
 }
 
+# Clean up any broken git state
+cleanup_git_state() {
+    local rebase_dir="${DOTFILES_GIT_DIR}/rebase-merge"
+    local rebase_apply="${DOTFILES_GIT_DIR}/rebase-apply"
+    
+    # Abort any in-progress rebase
+    if [[ -d "$rebase_dir" || -d "$rebase_apply" ]]; then
+        log WARN "Detected stale rebase. Aborting..."
+        "${GIT_CMD[@]}" rebase --abort >> "$LOG_FILE" 2>&1 || true
+        # If rebase --abort fails, force remove the directories
+        rm -rf "$rebase_dir" "$rebase_apply" 2>/dev/null || true
+    fi
+    
+    # Clean any conflict markers from working tree by checking out from HEAD
+    # Only do this if there are actual conflicts
+    if "${GIT_CMD[@]}" diff --check 2>&1 | grep -q "leftover conflict marker"; then
+        log WARN "Conflict markers detected. Cleaning working tree..."
+        "${GIT_CMD[@]}" checkout HEAD -- . >> "$LOG_FILE" 2>&1 || true
+    fi
+}
+
 pull_updates() {
     log SECTION "Synchronizing Dotfiles Repository"
-
+    
     if [[ ! -d "$DOTFILES_GIT_DIR" ]]; then
-        log ERROR "Dotfiles bare repository not found: $DOTFILES_GIT_DIR"
+        log ERROR "Bare repo not found: $DOTFILES_GIT_DIR"
         return 1
     fi
-
-    GIT_CMD=( "$GIT_BIN" --git-dir="$DOTFILES_GIT_DIR" --work-tree="$WORK_TREE" )
     
-    # Force untracked file output to OFF (fixes noisy logs and log file bloat)
+    GIT_CMD=("$GIT_BIN" --git-dir="$DOTFILES_GIT_DIR" --work-tree="$WORK_TREE")
     "${GIT_CMD[@]}" config status.showUntrackedFiles no 2>/dev/null || true
-
+    
+    # CRITICAL: Clean any broken state from previous runs
+    cleanup_git_state
+    
+    # --------------------------------------------------------------------------
+    # STASH UNCOMMITTED CHANGES
+    # --------------------------------------------------------------------------
     log INFO "Checking for local modifications..."
-
+    
     if ! "${GIT_CMD[@]}" diff-index --quiet HEAD -- 2>/dev/null; then
-        log WARN "Uncommitted changes detected in tracked files."
-        log INFO "Stashing your changes for safe pull..."
-
+        log WARN "Uncommitted changes detected."
+        log INFO "Stashing your changes..."
+        
         local stash_msg="orchestrator-auto-$(date +%Y%m%d-%H%M%S)"
-
-        # --- RECOVERY MENU ---
-        if ! "${GIT_CMD[@]}" stash push -m "$stash_msg" >> "$LOG_FILE" 2>&1; then
-            log ERROR "Git stash failed. This usually indicates a corrupted git index."
-            printf '\n'
-            printf "%s[ACTION REQUIRED]%s Select a recovery method:\n" "$CLR_YLW" "$CLR_RST"
-            printf "  1) Abort (Stop update, do nothing)\n"
-            printf "  %s2) Fix Index (DEFAULT) - Resets index, keeps your file changes%s\n" "$CLR_GRN" "$CLR_RST"
-            printf "  3) Discard Changes - Hard Reset (DANGEROUS)\n"
-            printf '\n'
+        
+        if "${GIT_CMD[@]}" stash push -m "$stash_msg" >> "$LOG_FILE" 2>&1; then
+            STASH_REF="$stash_msg"
+            log OK "Stashed: $STASH_REF"
+        else
+            log ERROR "Stash failed."
+            printf '\n%s[ACTION REQUIRED]%s\n' "$CLR_YLW" "$CLR_RST"
+            printf '  1) Abort\n'
+            printf '  2) Reset index (keeps files) [DEFAULT]\n'
+            printf '  3) Hard reset (DESTRUCTIVE)\n\n'
             
             local choice
-            # Timeout set to 60s to prevent hanging on headless runs
-            if ! read -r -t 60 -p "Enter choice [1-3] (default: 2, 60s timeout): " choice; then
-                choice="2" # Default on timeout
-                printf '\n'
-                log INFO "Timeout - using default option 2"
-            fi
+            read -r -t 60 -p "Choice [1-3]: " choice 2>/dev/null || choice="2"
             choice="${choice:-2}"
             
             case "$choice" in
                 2)
-                    log INFO "Resetting git index (preserving local files)..."
-                    if "${GIT_CMD[@]}" reset >> "$LOG_FILE" 2>&1; then
-                        log OK "Index reset. Retrying stash..."
-                        if ! "${GIT_CMD[@]}" stash push -m "$stash_msg" >> "$LOG_FILE" 2>&1; then
-                             log ERROR "Stash failed again even after reset. Aborting."
-                             return 1
-                        fi
+                    "${GIT_CMD[@]}" reset >> "$LOG_FILE" 2>&1 || { log ERROR "Reset failed"; return 1; }
+                    if "${GIT_CMD[@]}" stash push -m "$stash_msg" >> "$LOG_FILE" 2>&1; then
+                        STASH_REF="$stash_msg"
+                        log OK "Stashed after reset: $STASH_REF"
                     else
-                        log ERROR "Git reset failed."
+                        log ERROR "Stash still failing"; return 1
+                    fi
+                    ;;
+                3)
+                    read -r -t 30 -p "Type 'yes' to confirm destructive reset: " confirm || confirm=""
+                    [[ "$confirm" == "yes" ]] || { log INFO "Aborted"; return 1; }
+                    "${GIT_CMD[@]}" reset --hard HEAD >> "$LOG_FILE" 2>&1
+                    log WARN "Hard reset complete"
+                    ;;
+                *) log INFO "Aborted"; return 1 ;;
+            esac
+        fi
+    fi
+    
+    # --------------------------------------------------------------------------
+    # FIX REMOTE URL
+    # --------------------------------------------------------------------------
+    local current_url
+    current_url=$("${GIT_CMD[@]}" remote get-url origin 2>/dev/null) || current_url=""
+    
+    if [[ -z "$current_url" ]]; then
+        log WARN "No origin remote. Adding..."
+        "${GIT_CMD[@]}" remote add origin "$REPO_URL"
+    elif [[ "$current_url" != "$REPO_URL" ]]; then
+        log WARN "Remote mismatch: $current_url"
+        log INFO "Setting to: $REPO_URL"
+        "${GIT_CMD[@]}" remote set-url origin "$REPO_URL"
+    fi
+    
+    # --------------------------------------------------------------------------
+    # FETCH LATEST - PROPERLY SET UP TRACKING
+    # --------------------------------------------------------------------------
+    log INFO "Fetching from upstream..."
+    
+    # Fetch with refspec to properly update refs/remotes/origin/main
+    # This is the KEY FIX - bare repos with separate work-tree need explicit refspec
+    if ! timeout 60s "${GIT_CMD[@]}" fetch origin "+refs/heads/${BRANCH}:refs/remotes/origin/${BRANCH}" >> "$LOG_FILE" 2>&1; then
+        log ERROR "Fetch failed. Check network."
+        [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
+        return 1
+    fi
+    
+    log OK "Fetch complete."
+    
+    # --------------------------------------------------------------------------
+    # HANDLE UNTRACKED FILE COLLISIONS
+    # --------------------------------------------------------------------------
+    local remote_files untracked_files collision_list
+    # Now we can use origin/$BRANCH because we fetched with proper refspec
+    remote_files=$("${GIT_CMD[@]}" ls-tree -r --name-only "origin/${BRANCH}" 2>/dev/null) || remote_files=""
+    untracked_files=$("${GIT_CMD[@]}" ls-files --others --exclude-standard 2>/dev/null) || untracked_files=""
+    
+    if [[ -n "$remote_files" && -n "$untracked_files" ]]; then
+        collision_list=$(comm -12 <(printf '%s\n' "$remote_files" | sort) \
+                                  <(printf '%s\n' "$untracked_files" | sort) 2>/dev/null) || collision_list=""
+    else
+        collision_list=""
+    fi
+    
+    if [[ -n "$collision_list" ]]; then
+        local backup_dir="${HOME}/Documents/dusky_backup_$(date +%Y%m%d_%H%M%S)"
+        log WARN "Untracked collisions found. Backing up..."
+        mkdir -p "$backup_dir"
+        
+        while IFS= read -r file; do
+            [[ -z "$file" ]] && continue
+            [[ -e "${WORK_TREE}/${file}" ]] || continue
+            mkdir -p "$backup_dir/$(dirname "$file")"
+            mv -- "${WORK_TREE}/${file}" "$backup_dir/${file}"
+            log RAW "  → Backed up: $file"
+        done <<< "$collision_list"
+        
+        log OK "Collisions backed up to: $backup_dir"
+    fi
+    
+    # --------------------------------------------------------------------------
+    # SYNC STRATEGY: RESET TO UPSTREAM
+    # --------------------------------------------------------------------------
+    log INFO "Checking sync status..."
+    
+    local local_head remote_head base_commit
+    local_head=$("${GIT_CMD[@]}" rev-parse HEAD 2>/dev/null) || local_head=""
+    remote_head=$("${GIT_CMD[@]}" rev-parse "origin/${BRANCH}" 2>/dev/null) || remote_head=""
+    
+    if [[ -z "$local_head" || -z "$remote_head" ]]; then
+        log ERROR "Cannot determine HEAD commits"
+        log ERROR "local_head='$local_head' remote_head='$remote_head'"
+        [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
+        return 1
+    fi
+    
+    if [[ "$local_head" == "$remote_head" ]]; then
+        log OK "Already up to date."
+    else
+        # Check if we can fast-forward
+        base_commit=$("${GIT_CMD[@]}" merge-base "$local_head" "$remote_head" 2>/dev/null) || base_commit=""
+        
+        if [[ "$base_commit" == "$local_head" ]]; then
+            # Local is behind remote - can fast-forward
+            log INFO "Fast-forwarding to upstream..."
+            if "${GIT_CMD[@]}" reset --hard "origin/${BRANCH}" >> "$LOG_FILE" 2>&1; then
+                log OK "Updated to latest."
+            else
+                log ERROR "Reset failed"
+                [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
+                return 1
+            fi
+        else
+            # Histories diverged
+            log WARN "Local history diverged from upstream."
+            printf '\n'
+            printf '%s[DIVERGED HISTORY]%s Choose sync method:\n' "$CLR_YLW" "$CLR_RST"
+            printf '  1) Abort (keep current state)\n'
+            printf '  %s2) Reset to upstream [RECOMMENDED]%s\n' "$CLR_GRN" "$CLR_RST"
+            printf '     Your uncommitted tweaks are safe in stash.\n'
+            printf '  3) Attempt rebase (may fail)\n'
+            printf '\n'
+            
+            local sync_choice
+            if ! read -r -t 60 -p "Choice [1-3] (default: 2): " sync_choice; then
+                sync_choice="2"
+                printf '\n'
+            fi
+            sync_choice="${sync_choice:-2}"
+            
+            case "$sync_choice" in
+                1)
+                    log INFO "Aborted."
+                    [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
+                    return 1
+                    ;;
+                2)
+                    log INFO "Resetting to upstream..."
+                    if "${GIT_CMD[@]}" reset --hard "origin/${BRANCH}" >> "$LOG_FILE" 2>&1; then
+                        log OK "Reset complete."
+                    else
+                        log ERROR "Reset failed"
+                        [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
                         return 1
                     fi
                     ;;
                 3)
-                    printf '\n'
-                    printf "%s┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓%s\n" "$CLR_RED" "$CLR_RST"
-                    printf "%s┃   WARNING: DATA LOSS IMMINENT                               ┃%s\n" "$CLR_RED" "$CLR_RST"
-                    printf "%s┃   This will IRREVERSIBLY DELETE all uncommitted changes.    ┃%s\n" "$CLR_RED" "$CLR_RST"
-                    printf "%s┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛%s\n" "$CLR_RED" "$CLR_RST"
+                    log INFO "Attempting rebase..."
+                    local rebase_output rebase_rc=0
+                    rebase_output=$("${GIT_CMD[@]}" rebase "origin/${BRANCH}" 2>&1) || rebase_rc=$?
+                    printf '%s\n' "$rebase_output" >> "$LOG_FILE"
                     
-                    local confirm
-                    read -r -t 30 -p "Are you absolutely sure? (type 'yes' to proceed): " confirm || confirm=""
-                    if [[ "$confirm" == "yes" ]]; then
-                        log WARN "Hard resetting repository to HEAD..."
-                        if "${GIT_CMD[@]}" reset --hard HEAD >> "$LOG_FILE" 2>&1; then
-                            log OK "Repository forcefully cleaned. Proceeding."
+                    if ((rebase_rc != 0)); then
+                        log ERROR "Rebase failed."
+                        log INFO "Aborting and resetting..."
+                        "${GIT_CMD[@]}" rebase --abort >> "$LOG_FILE" 2>&1 || true
+                        
+                        if "${GIT_CMD[@]}" reset --hard "origin/${BRANCH}" >> "$LOG_FILE" 2>&1; then
+                            log OK "Fallback reset complete."
                         else
-                             log ERROR "Git hard reset failed."
-                             return 1
+                            log ERROR "Reset also failed."
+                            return 1
                         fi
                     else
-                        log INFO "Aborted by user."
-                        return 1
+                        log OK "Rebase successful."
                     fi
                     ;;
                 *)
-                    log ERROR "Aborting by user request."
+                    log INFO "Invalid. Aborting."
+                    [[ -n "${STASH_REF:-}" ]] && "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
                     return 1
                     ;;
             esac
         fi
-        # --- END RECOVERY MENU ---
-
-        # Double check if stash was actually created
-        if [[ -z "${STASH_REF:-}" ]]; then
-             if "${GIT_CMD[@]}" stash list 2>/dev/null | grep -q "$stash_msg"; then
-                 STASH_REF="$stash_msg"
-                 log OK "Changes stashed: $stash_msg"
-             fi
-        fi
     fi
-
-    log INFO "Pulling updates from $REPO_URL..."
-
-    local git_output
-    local git_rc=0
     
-    # Use timeout to prevent hanging on bad networks
-    if ! git_output=$(timeout 45s "${GIT_CMD[@]}" pull --rebase origin "$BRANCH" 2>&1); then
-        git_rc=$?
-        log WARN "Pull failed (exit code: $git_rc), attempting fetch from URL directly..."
-        printf '%s\n' "$git_output" >> "$LOG_FILE"
-
-        if ! timeout 45s "${GIT_CMD[@]}" fetch "$REPO_URL" "$BRANCH" >> "$LOG_FILE" 2>&1; then
-            log ERROR "Network error or repository unreachable."
-            if [[ -n "${STASH_REF:-}" ]]; then
-                "${GIT_CMD[@]}" stash pop --quiet 2>/dev/null && STASH_REF=""
-            fi
-            return 1
-        fi
-
-        if ! git_output=$("${GIT_CMD[@]}" rebase FETCH_HEAD 2>&1); then
-            log ERROR "Rebase failed. Possible merge conflicts."
-            printf '%s\n' "$git_output" >> "$LOG_FILE"
-            printf '\n%s[GIT ERROR]%s Check log for details.\n' "$CLR_RED" "$CLR_RST"
-            log ERROR "Resolve with: git --git-dir=$DOTFILES_GIT_DIR --work-tree=$WORK_TREE status"
-            
-            if [[ -n "${STASH_REF:-}" ]]; then
-                log WARN "Your local changes remain stashed as: $STASH_REF"
-                STASH_REF=""  
-            fi
-            return 1
-        fi
-    else
-        # Log successful output
-        printf '%s\n' "$git_output" >> "$LOG_FILE"
-    fi
-
-    log OK "Repository updated successfully."
-
+    log OK "Repository synchronized."
+    
+    # --------------------------------------------------------------------------
+    # RESTORE STASHED CHANGES
+    # --------------------------------------------------------------------------
     if [[ -n "${STASH_REF:-}" ]]; then
-        log INFO "Restoring your local modifications..."
-
+        log INFO "Restoring your modifications..."
+        
         if "${GIT_CMD[@]}" stash pop >> "$LOG_FILE" 2>&1; then
             STASH_REF=""
-            log OK "Your customizations have been re-applied."
+            log OK "Your customizations re-applied."
         else
-            log WARN "Merge conflict during stash pop!"
-            log WARN "Resolve conflicts, then: git --git-dir=$DOTFILES_GIT_DIR --work-tree=$WORK_TREE stash drop"
+            log WARN "Stash pop had conflicts."
+            log INFO "Your changes are in stash. Resolve manually, then:"
+            printf '    git --git-dir=%s --work-tree=%s stash drop\n' "$DOTFILES_GIT_DIR" "$WORK_TREE"
             STASH_REF=""
         fi
     fi
-
+    
     return 0
 }
 
 run_script() {
-    # Validate arguments
-    if (($# < 2)); then
-        log ERROR "run_script requires mode and script arguments"
-        return 1
-    fi
+    (($# >= 2)) || { log ERROR "run_script: need mode and script"; return 1; }
     
-    local -r mode="$1"
-    local -r script="$2"
+    local -r mode="$1" script="$2"
     shift 2
     local -a args=("$@")
-
     local -r script_path="${SCRIPT_DIR}/${script}"
-
-    if [[ ! -f "$script_path" ]]; then
-        log WARN "Script not found: $script"
-        return 0
-    fi
-
-    if [[ ! -r "$script_path" ]]; then
-        log WARN "Script not readable: $script"
-        return 0
-    fi
-
-    if ((${#args[@]} > 0)); then
-        printf '%s→%s %s %s\n' "$CLR_BLU" "$CLR_RST" "$script" "${args[*]}"
-    else
-        printf '%s→%s %s\n' "$CLR_BLU" "$CLR_RST" "$script"
-    fi
-
+    
+    [[ -f "$script_path" ]] || { log WARN "Not found: $script"; return 0; }
+    [[ -r "$script_path" ]] || { log WARN "Not readable: $script"; return 0; }
+    
+    printf '%s→%s %s %s\n' "$CLR_BLU" "$CLR_RST" "$script" "${args[*]:-}"
+    
     local rc=0
     case "$mode" in
-        S)  
-            if ((${#args[@]} > 0)); then
-                sudo "$BASH_BIN" "$script_path" "${args[@]}" || rc=$?
-            else
-                sudo "$BASH_BIN" "$script_path" || rc=$?
-            fi
-            ;;
-        U)  
-            if ((${#args[@]} > 0)); then
-                "$BASH_BIN" "$script_path" "${args[@]}" || rc=$?
-            else
-                "$BASH_BIN" "$script_path" || rc=$?
-            fi
-            ;;
-        *)
-            log WARN "Unknown mode '$mode' for $script"
-            return 0
-            ;;
+        S) sudo "$BASH_BIN" "$script_path" "${args[@]}" || rc=$? ;;
+        U) "$BASH_BIN" "$script_path" "${args[@]}" || rc=$? ;;
+        *) log WARN "Unknown mode: $mode"; return 0 ;;
     esac
-
-    if ((rc != 0)); then
-        log ERROR "$script exited with code $rc"
-        FAILED_SCRIPTS+=("$script")
-    fi
-
+    
+    ((rc == 0)) || { log ERROR "$script failed (exit $rc)"; FAILED_SCRIPTS+=("$script"); }
     return 0
 }
 
 main() {
     setup_logging
     
-    # Acquire exclusive lock
+    # Exclusive lock
     exec 9>"$LOCK_FILE"
-    if ! flock -n 9; then
-        log ERROR "Another instance is already running (lock: $LOCK_FILE)"
-        exit 1
-    fi
-
-    # Calculate hash of THIS script before update (using absolute path)
-    local self_hash_before
-    if [[ -r "$SELF_PATH" ]]; then
-        # Check if sha256sum exists (part of coreutils, standard on Arch)
-        if command -v sha256sum >/dev/null; then
-             self_hash_before=$(sha256sum "$SELF_PATH" 2>/dev/null | awk '{print $1}') || self_hash_before=""
-        else
-             # Fallback to md5sum if weirdly missing, though unlikely on Arch
-             self_hash_before=$(md5sum "$SELF_PATH" 2>/dev/null | awk '{print $1}') || self_hash_before=""
-        fi
-    else
-        self_hash_before=""
-    fi
-
+    flock -n 9 || { log ERROR "Another instance running"; exit 1; }
+    
+    # Self-update check hash
+    local self_hash_before=""
+    [[ -r "$SELF_PATH" ]] && self_hash_before=$(sha256sum "$SELF_PATH" 2>/dev/null | cut -d' ' -f1)
+    
     init_sudo
-
+    
     if ! pull_updates; then
-        log WARN "Repository sync encountered errors."
-        local cont
-        if ! read -r -t 30 -p "Continue with local scripts anyway? [y/N] " cont; then
-            cont="n"
-            printf '\n'
-        fi
-        if [[ ! "$cont" =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
+        log WARN "Sync failed."
+        local cont=""
+        read -r -t 30 -p "Continue with local scripts? [y/N] " cont || cont="n"
+        [[ "$cont" =~ ^[Yy]$ ]] || exit 1
     else
-        # --- SELF-UPDATE CHECK ---
+        # Self-update re-exec
         if [[ -n "$self_hash_before" && -r "$SELF_PATH" ]]; then
             local self_hash_after
-            if command -v sha256sum >/dev/null; then
-                self_hash_after=$(sha256sum "$SELF_PATH" 2>/dev/null | awk '{print $1}') || self_hash_after=""
-            else
-                self_hash_after=$(md5sum "$SELF_PATH" 2>/dev/null | awk '{print $1}') || self_hash_after=""
-            fi
-
+            self_hash_after=$(sha256sum "$SELF_PATH" 2>/dev/null | cut -d' ' -f1) || self_hash_after=""
             if [[ -n "$self_hash_after" && "$self_hash_before" != "$self_hash_after" ]]; then
                 log SECTION "Self-Update Detected"
-                log OK "The orchestrator script has been updated."
-                log INFO "Reloading new version..."
-                
-                # Release lock before re-execing
-                exec 9>&- 
-                rm -f "$LOCK_FILE" 2>/dev/null || true
-                
-                # Clear stash ref so cleanup doesn't try to pop
+                log OK "Reloading..."
+                exec 9>&-
+                rm -f "$LOCK_FILE"
                 STASH_REF=""
-                
-                # Re-execute the new script with original arguments
-                # Uses realpath to ensure we find the script even if CWD changed
                 exec "$SELF_PATH" "$@"
             fi
         fi
     fi
-
-    if [[ ! -d "$SCRIPT_DIR" ]]; then
-        log ERROR "Script directory missing: $SCRIPT_DIR"
-        exit 1
-    fi
-
+    
+    [[ -d "$SCRIPT_DIR" ]] || { log ERROR "Script dir missing: $SCRIPT_DIR"; exit 1; }
+    
     log SECTION "Executing Update Sequence"
-
+    
     local entry mode script_part script
     local -a parts args
-
+    
     for entry in "${UPDATE_SEQUENCE[@]}"; do
-        # Skip comments and empty lines
         [[ "$entry" =~ ^[[:space:]]*# ]] && continue
         [[ -z "${entry//[[:space:]]/}" ]] && continue
-
+        
         mode=$(trim "${entry%%|*}")
         script_part=$(trim "${entry#*|}")
-
-        # Parse script and arguments
         read -ra parts <<< "$script_part"
-
         script="${parts[0]:-}"
         args=("${parts[@]:1}")
-
-        if [[ -z "$script" ]]; then
-            log WARN "Malformed playlist entry: $entry"
-            continue
-        fi
-
+        
+        [[ -n "$script" ]] || { log WARN "Malformed: $entry"; continue; }
         run_script "$mode" "$script" "${args[@]}"
     done
 }
