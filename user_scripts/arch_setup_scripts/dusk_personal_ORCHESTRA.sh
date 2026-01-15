@@ -11,6 +11,8 @@
 # --- USER CONFIGURATION AREA ---
 
 INSTALL_SEQUENCE=(
+    "U | 000_configure_keyboard.sh"
+    "U | 000_uwsm_env_comment.sh"
     "U | 000_configure_uwsm_gpu.sh"
     "U | 001_long_sleep_timeout.sh"
     "S | 002_battery_limiter.sh"

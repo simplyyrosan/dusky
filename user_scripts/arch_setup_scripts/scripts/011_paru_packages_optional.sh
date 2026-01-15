@@ -60,6 +60,7 @@ Productivity   | pinta                 | Simple drawing/editing tool (Paint.NET 
 Productivity   | gimp                  | Photoshop alternative for linux
 Productivity   | libreoffice-still     | Microsoft office alternative (Stable)
 # Productivity   | libreoffice-fresh     | Microsoft office alternative (latest)
+Media   | pear-desktop-bin      | Youtube Music Gui 
 Games   | pipes-rs-bin          | Rust port of the classic pipes screensaver
 Games   | 2048.c                | The 2048 sliding tile game in C
 Games   | edex-ui-bin           | Sci-Fi/Tron-inspired terminal emulator
