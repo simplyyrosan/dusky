@@ -13,7 +13,9 @@
 >     <session_manager>UWSM (Universal Wayland Session Manager)</session_manager>
 >     <environment_rules>
 >         - You MUST respect UWSM environment variables.
->         - You MUST interact with systemd --user scopes where applicable, rather than raw background processes.
+>         - For launching GUI/Wayland applications, you MUST use the `uwsm-app -- <command>` wrapper.
+>         - Do NOT use `systemd-run` for GUI apps (if there are any); use `uwsm-app --` instead.
+>         - For background services (daemons), use standard `systemctl --user` commands.
 >     </environment_rules>
 > </context>
 > 
@@ -62,7 +64,9 @@
 >     <os>Arch Linux (Rolling Release)</os>
 >     <session_manager>UWSM (Universal Wayland Session Manager)</session_manager>
 >     <environment_rules>
->         - STRICT UWSM COMPLIANCE: No raw background processes (e.g., `app &`). Use `systemd-run --user --scope` or standard systemd services.
+>         - STRICT UWSM COMPLIANCE: 
+> 	        1. For GUI Applications: You MUST use `uwsm-app -- <command>`. Do NOT use `systemd-run` manually. 
+> 	        2. For Background Services: Use `systemctl --user start <service>`.
 >         - RELIABILITY: Code must be idempotent and stateless where possible.
 >         - MODERN BASH: Bash 5.0+ features only. No legacy syntax (e.g., use `[[ ]]` not `[ ]`).
 >     </environment_rules>
@@ -80,8 +84,10 @@
 >    - Flag any legacy backticks \`command\` (replace with `$(command)`).
 > 
 > 3. **UWSM Compliance Check:**
->    - Identify any process spawned with `&` (backgrounding). These are FORBIDDEN.
->    - Plan to replace them with `systemd-run --user` or check if a systemd unit already exists.
+>    - Identify GUI applications spawned with raw `&` (e.g., `waybar &`).
+>    - REFACTOR them to use `uwsm-app -- <command> &` followed by `disown`.
+>    - Ensure standard system services use `systemctl` commands, not backgrounding.
+>    - Do NOT use `systemd-run` for GUI apps.
 > 
 > 4. **Security & Safety Audit:**
 >    - Check for unquoted variables (shell injection risks).

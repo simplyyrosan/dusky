@@ -9,7 +9,9 @@ Your goal is to generate a highly optimized, robust, and stateless Bash script (
     <session_manager>UWSM (Universal Wayland Session Manager)</session_manager>
     <environment_rules>
         - You MUST respect UWSM environment variables.
-        - You MUST interact with systemd --user scopes where applicable, rather than raw background processes.
+        - For launching GUI/Wayland applications, you MUST use the `uwsm-app -- <command>` wrapper.
+        - Do NOT use `systemd-run` for GUI apps (if there are any); use `uwsm-app --` instead.
+        - For background services (daemons), use standard `systemctl --user` commands.
     </environment_rules>
 </context>
 
