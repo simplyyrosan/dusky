@@ -39,7 +39,7 @@ window#waybar {
     color: @on_primary;
     /* CHANGED: 10px ensures 4 digits (e.g. 12:00) fit comfortably */
     font-size: 10px; 
-    padding-bottom: 8px;
+    padding-bottom: 7px;
 }
 
 #group-stats {
@@ -68,6 +68,8 @@ window#waybar {
 
 #custom-notification {
     color: @on_surface_variant;
+	padding: 6px 4px 6px 3px;
+	border-radius: 30px;
 }
 
 /* --- CENTER SECTION --- */

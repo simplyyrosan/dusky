@@ -128,7 +128,7 @@ tooltip label {
    ═══════════════════════════════════════════════════════════════════════════ */
 #custom-launcher {
     font-size: 14px;
-    padding: 0 8px;
+    padding: 0px 10px 0px 6px;
     color: @primary;
     background-color: @primary_container;
     border-radius: 6px;
@@ -152,7 +152,7 @@ tooltip label {
 }
 
 #workspaces button {
-    padding: 0 2px;
+    padding: 0px 1px 0px 2px;
     margin: 2px 1px;
     border-radius: 4px;
     color: @on_surface_variant;
@@ -227,7 +227,7 @@ tooltip label {
     color: @on_primary_container;
     font-size: 11px;
     font-weight: 600;
-    padding: 0 12px;
+    padding: 0px 13px 0px 7px;
     border-radius: 6px;
     margin: 2px 4px;
 }
@@ -258,7 +258,7 @@ tooltip label {
 #group-system {
     background-color: @surface_container_low;
     border-radius: 6px;
-    padding: 0 1px;
+    padding: 0px 2px 0px 1px;
     margin: 2px 1px;
 }
 
@@ -269,8 +269,8 @@ tooltip label {
 #memory,
 #disk,
 #temperature {
-    padding: 0 5px;
-    margin: 2px 0;
+    padding: 0px 5px;
+    margin: 2px 1px;
     font-size: 10px;
     border-radius: 4px;
 }
@@ -376,7 +376,7 @@ tooltip label {
 #bluetooth {
     color: @secondary;
     font-size: 12px;
-    padding: 0 4px;
+    padding: 0px 5px 0px 4px;
     margin: 2px 0;
     border-radius: 4px;
 }
@@ -412,6 +412,7 @@ tooltip label {
 
 #battery {
     color: @primary;
+    padding: 0px 4px 0px 5px
 }
 
 #battery:hover {
@@ -449,7 +450,7 @@ tooltip label {
 #custom-inhibit-suspend,
 #custom-notification {
     font-size: 12px;
-    padding: 0 6px;
+    padding: 0px 6px 0px 4px;
     margin: 2px 0;
     border-radius: 4px;
 }
@@ -525,7 +526,7 @@ tooltip label {
    ═══════════════════════════════════════════════════════════════════════════ */
 #custom-power {
     font-size: 12px;
-    padding: 0 8px;
+    padding: 0px 8px 0px 5px;
     margin: 2px 2px 2px 4px;
     color: @error;
     background-color: @error_container;

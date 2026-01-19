@@ -41,9 +41,16 @@ window#waybar {
 
 tooltip {
     background: @surface_container;
-    border: 2px solid @primary-mild;
-    color: @on_surface;
+    border: 2px solid @primary;
+    border-radius: 16px;
 }
+
+tooltip label {
+    color: @on_surface;
+    padding: 8px 12px;
+    font-size: 13px;
+}
+
 /* ============================================================ */
 /* WORKSPACES                                                  */
 /* ============================================================ */
@@ -60,29 +67,40 @@ tooltip {
     padding: 0px;
     margin: 0px 3px;
     border-radius: 45px;
-    color: transparent;
     background-color: @primary-mild;
-    transition: all 0.3s ease-in-out;
+    color: transparent;
+
+    font-size: 0px; 
+    min-width: 25px;
+    min-height: 25px;
+
+    transition: all 0.3s cubic-bezier(0.55, -0.04, 0.3, 1.44);
 }
 
 #workspaces button.active {
     background-color: @primary;
     color: @background;
-    min-width: 40px;
+
     font-size: 12px;
+    min-width: 40px;
+    padding: 0 6px;
 }
 
 #workspaces button:hover {
     background-color: @primary_container;
     color: @on_primary_container;
     border-radius: 16px;
-    min-width: 35px;
+    
+    font-size: 12px; 
+    min-width: 50px; 
+    padding: 0 6px;
 }
 
 #workspaces button.urgent {
     background-color: @error;
     color: @on_error;
     border-radius: 16px;
+    font-size: 12px; 
     min-width: 40px;
 }
 
@@ -124,9 +142,9 @@ tooltip {
 
 #custom-arch {
     color: @primary;
-    font-size: 16px;
+    font-size: 17px;
     margin: 0 6px;
-    padding: 5px 14px;
+    padding: 5px 15px 5px 11px;
 }
 
 #custom-arch:hover {
@@ -139,10 +157,13 @@ tooltip {
 #custom-logout,
 #custom-reboot,
 #custom-shutdown {
-    font-size: 14px;
+    font-size: 17px;
     margin: 0 6px;
-    padding: 5px 12px;
+    padding: 5px 12px 5px 11px; 
     color: @error;
+    border-radius: 60px; 
+    border: 2px solid @error; 
+    background-color: @surface_container;
 }
 
 #custom-lock:hover,
@@ -163,9 +184,18 @@ tooltip {
     padding: 0;
 }
 
-#temperature.cpu { color: @primary; }
-#custom-gpu { color: @secondary; }
-#temperature.system { color: @tertiary; }
+#temperature.cpu { 
+	color: @primary; 
+	padding: 0px 12px 0px 7px;
+}
+#custom-gpu { 
+	color: @secondary; 
+	padding: 0px 12px 0px 7px;
+}
+#temperature.system {
+	color: @tertiary; 
+	padding: 0px 12px 0px 7px;
+}
 
 #temperature.cpu:hover {
     background-color: @primary;
@@ -211,7 +241,10 @@ tooltip {
     color: @background;
 }
 
-#pulseaudio { color: @secondary; }
+#pulseaudio { 
+	font-size: 14px;
+	color: @secondary; 
+}
 #pulseaudio:hover {
     background-color: @secondary;
     color: @background;
@@ -220,7 +253,12 @@ tooltip {
     color: @outline;
 }
 
-#network { color: @primary_container; }
+#network { 
+	font-size: 17px;
+	color: @primary_container; 
+	padding: 10px 14px 8px 9px;
+}
+	
 #network:hover {
     background-color: @primary_container;
     color: @on_primary_container;
@@ -230,7 +268,11 @@ tooltip {
     border-color: @error;
 }
 
-#bluetooth { color: @primary; }
+#bluetooth { 
+	font-size: 14px;
+	color: @primary; 
+	padding: 6px 10px 6px 9px;
+}
 #bluetooth:hover {
     background-color: @primary;
     color: @background;
@@ -240,7 +282,10 @@ tooltip {
     border-color: @outline;
 }
 
-#battery { color: @tertiary; }
+#battery { 
+	color: @tertiary; 
+	padding: 5px 14px 5px 8px;
+}
 #battery:hover {
     background-color: @tertiary;
     color: @background;
@@ -264,7 +309,11 @@ tooltip {
     border-color: @primary;
 }
 
-#custom-notification { color: @on_surface; }
+#custom-notification { 
+	font-size: 15px;
+	color: @on_surface; 
+	padding: 5px 15px 5px 12px;
+}
 #custom-notification:hover {
     background-color: @on_surface;
     color: @surface;

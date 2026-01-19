@@ -1,5 +1,6 @@
 //horizontal_circular
 {
+	"reload_style_on_change": true,
     "layer": "top",
     "position": "top",
     "margin-top": 10,

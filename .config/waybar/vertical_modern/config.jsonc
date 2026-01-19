@@ -9,6 +9,7 @@
     "margin-left": 4,
     "margin-right": 0,
     "fixed-center": true,
+    "reload_style_on_change": true,
 
     // ===================================================================
     // MODULE LAYOUT
@@ -113,7 +114,7 @@
 
     "battery": {
         // Stacked: Icon on top, Capacity % below
-        "format": "{icon}\n{capacity}",
+        "format": " {icon}\n{capacity}",
         "format-charging": "\n{capacity}",
         "format-icons": ["󰂎", "󰁺", "󰁻", "󰁼", "󰁽", "󰁾", "󰁿", "󰂀", "󰂁", "󰂂", "󰁹"],
         "interval": 5,

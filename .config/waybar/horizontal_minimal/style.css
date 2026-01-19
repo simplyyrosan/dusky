@@ -29,8 +29,9 @@ window#waybar {
     
     /* CHANGED: Reduced side margins from 2px to 1px to fit the 38px width */
     margin: 1px 3px; 
+    font-size: 15px;
     
-    padding: 0px 6px;
+    padding: 0px 7px 0px 8px;
     box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2);
 }
 

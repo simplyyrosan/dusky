@@ -1,12 +1,13 @@
 @import url("../../.config/matugen/generated/waybar-colors.css");
 
 * {
-    font-family: "JetBrainsMono Nerd Font", "Noto Sans", sans-serif;
+    font-family: "JetBrainsMono Nerd Font", "JetBrains Mono NF", "JetBrains Mono", "Symbols Nerd Font", sans-serif;
     font-size: 13px;
     font-weight: bold;
     min-height: 0;
     border: none;
     border-radius: 0;
+    margin: 2px;
 }
 
 window#waybar {
@@ -29,7 +30,7 @@ window#waybar {
     /* CHANGED: Reduced side margins from 2px to 1px to fit the 38px width */
     margin: 3px 1px; 
     
-    padding: 6px 0px;
+    padding: 6px 2px 6px 3px;
     box-shadow: 0 2px 3px rgba(0, 0, 0, 0.2);
 }
 
@@ -47,13 +48,21 @@ window#waybar {
     padding: 8px 0;
 }
 
+#cpu label, 
+#memory label, 
+#temperature label {
+    -gtk-icon-transform: scale(1);
+    margin: 0 1;
+}
+
 #cpu, #memory, #temperature {
     background: transparent;
     box-shadow: none;
     margin: 4px 0;
-    padding: 0;
+    padding: 0px 1px 0px 1px;
     font-size: 10px;
     color: @on_surface_variant;
+    min-width: 22px;
     
     /* ADDED: Strong black text-shadow for visibility on light backgrounds */
     text-shadow: 1px 1px 2px rgba(0, 0, 0, 1.0);
@@ -103,7 +112,7 @@ window#waybar {
 /* --- BOTTOM SECTION --- */
 #custom-network {
     font-size: 10px;
-    padding: 8px 0;
+    padding: 8px 2px 8px 0px;
 }
 
 #pulseaudio, #battery {
