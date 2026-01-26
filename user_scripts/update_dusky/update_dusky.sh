@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  ARCH LINUX UPDATE ORCHESTRATOR (v5.8 - Hardened & Optimized + Custom Paths)
+#  ARCH LINUX UPDATE ORCHESTRATOR (v5.9 - Hardened & Optimized + Custom Paths)
 #  Description: Manages dotfile/system updates while preserving user tweaks.
 #  Target:      Arch Linux / Hyprland / UWSM / Bash 5.0+
 #  Repo Type:   Git Bare Repository (--git-dir=~/dusky --work-tree=~)
@@ -786,6 +786,22 @@ run_script() {
 main() {
     # Check dependencies first (before any logging)
     check_dependencies
+
+    # --------------------------------------------------------------------------
+    # USER INTERACTION SAFETY CHECK
+    # --------------------------------------------------------------------------
+    if [[ -t 0 ]]; then
+        printf '\n%s⚠️  WARNING: DO NOT INTERRUPT THIS SCRIPT! ⚠️%s\n' "${CLR_RED}" "${CLR_RST}"
+        printf 'Interrupting the orchestration process causes Git locks and inconsistent states.\n'
+        printf 'Please allow the script to complete fully before closing.\n\n'
+        
+        local start_confirm
+        read -r -p "Do you understand and wish to start the update? [y/N] " start_confirm
+        if [[ ! "$start_confirm" =~ ^[Yy]$ ]]; then
+            printf 'Update cancelled. You can run it later.\n'
+            exit 0
+        fi
+    fi
 
     setup_logging
 
