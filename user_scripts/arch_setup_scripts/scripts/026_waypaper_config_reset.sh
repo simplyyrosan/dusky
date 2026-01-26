@@ -85,9 +85,8 @@ EOF
 
     log_success "New configuration generated at: $CONFIG_FILE"
     
-    # Optional: Logic verification for the 'dusk' user path
     if [[ "$USER" != "dusk" ]]; then
-         printf "${C_BLUE}[NOTE]${C_RESET} Config contains hardcoded path '/home/dusk/...'. Ensure this is correct for your user.\n"
+         printf "${C_BLUE}[NOTE]${C_RESET} Waypaper config has been reset to fix teh git bug!\n"
     fi
 }
 
