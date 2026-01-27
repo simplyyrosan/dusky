@@ -21,7 +21,7 @@
     "custom/notification",
     "custom/theme-toggle",
     "custom/net-speed",
-    "tray"
+  //  "tray"
   ],
 
   "modules-center": [
