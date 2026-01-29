@@ -2,8 +2,6 @@
 #==============================================================================
 # FZF Clipboard Manager with Live Image Preview
 # For Arch Linux / Hyprland
-#
-# Version: 2.2.0 - UWSM & Persistence Manager Support
 #==============================================================================
 
 set -o nounset
@@ -17,8 +15,8 @@ readonly XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 readonly XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 
 # --- UWSM / PERSISTENCE INTEGRATION ---
-# Dynamically loads the database path from the UWSM config to ensure strict
-# compatibility with the Persistence Manager (Ephemeral vs Persistent modes).
+# COMPATIBILITY RESTORED: Uses 'eval' to correctly expand variables (like
+# ${XDG_RUNTIME_DIR}) found in the uwsm/env file.
 if [[ -z "${CLIPHIST_DB_PATH:-}" ]] && [[ -f "$HOME/.config/uwsm/env" ]]; then
     # Extract only the active export line for the DB path
     db_config=$(grep -E '^export CLIPHIST_DB_PATH=' "$HOME/.config/uwsm/env" || true)
@@ -39,7 +37,7 @@ readonly SEP=$'\x1f'
 
 # Icons - Using emoji for universal compatibility
 readonly ICON_PIN="📌"
-readonly ICON_IMG="🖼"
+readonly ICON_IMG="📸"
 
 # Self reference
 readonly SELF="$(realpath "${BASH_SOURCE[0]}")"
@@ -49,8 +47,9 @@ readonly SELF="$(realpath "${BASH_SOURCE[0]}")"
 #==============================================================================
 notify() {
     local msg="$1" urgency="${2:-normal}"
-    command -v notify-send &>/dev/null && \
+    if command -v notify-send &>/dev/null; then
         notify-send -u "$urgency" -a "Clipboard" "📋 Clipboard" "$msg" 2>/dev/null
+    fi
     [[ "$urgency" == "critical" ]] && printf '\e[31mError:\e[0m %s\n' "$msg" >&2
 }
 
@@ -72,7 +71,7 @@ check_deps() {
         command -v chafa &>/dev/null || opt+=("chafa")
         command -v bat &>/dev/null || opt+=("bat")
         ((${#opt[@]})) && notify "Recommended: sudo pacman -S ${opt[*]}" "low"
-        touch "$warn_flag" 2>/dev/null
+        : > "$warn_flag" 2>/dev/null
     fi
 }
 
@@ -85,11 +84,14 @@ setup_dirs() {
 # UTILITIES
 #==============================================================================
 generate_hash() {
+    local hash
     if command -v b2sum &>/dev/null; then
-        printf '%s' "$1" | b2sum | cut -c1-16
+        hash=$(printf '%s' "$1" | b2sum)
     else
-        printf '%s' "$1" | md5sum | cut -c1-16
+        hash=$(printf '%s' "$1" | md5sum)
     fi
+    # Optimization: Use Bash substring instead of 'cut'
+    printf '%s' "${hash:0:16}"
 }
 
 sanitize_text() {
@@ -105,12 +107,9 @@ sanitize_text() {
 
 #==============================================================================
 # IMAGE DETECTION
-# cliphist format: [[ binary data SIZE FORMAT WIDTHxHEIGHT ]]
 #==============================================================================
 is_image() {
-    local content="$1"
-    local lower="${content,,}"
-    
+    local lower="${1,,}"
     if [[ "$lower" == *"binary"* ]]; then
         [[ "$lower" == *"png"* ]] && return 0
         [[ "$lower" == *"jpg"* ]] && return 0
@@ -160,7 +159,11 @@ cache_image() {
     
     [[ -f "$path" ]] && { printf '%s' "$path"; return 0; }
     
-    local tmp="$path.tmp.$$"
+    # Improved Hygiene: mktemp + trap
+    local tmp
+    tmp=$(mktemp "$CACHE_DIR/${id}.tmp.XXXXXX") || return 1
+    trap 'rm -f "$tmp" 2>/dev/null' RETURN
+    
     if cliphist decode "$id" > "$tmp" 2>/dev/null; then
         local ftype
         ftype=$(file -b "$tmp" 2>/dev/null)
@@ -168,11 +171,11 @@ cache_image() {
            [[ "${ftype,,}" == *"png"* ]] || [[ "${ftype,,}" == *"jpeg"* ]] || \
            [[ "${ftype,,}" == *"gif"* ]] || [[ "${ftype,,}" == *"webp"* ]]; then
             mv -f "$tmp" "$path" 2>/dev/null
+            trap - RETURN
             printf '%s' "$path"
             return 0
         fi
     fi
-    rm -f "$tmp" 2>/dev/null
     return 1
 }
 
@@ -346,11 +349,16 @@ cmd_pin() {
             notify "Image pinning not supported" "low"
             ;;
         txt)
-            local content hash
+            local content hash pin_file tmp_file
             if content=$(cliphist decode "$id" 2>/dev/null) && [[ -n "$content" ]]; then
                 hash=$(generate_hash "$content")
-                printf '%s' "$content" > "$PINS_DIR/${hash}.pin"
-                chmod 600 "$PINS_DIR/${hash}.pin"
+                pin_file="$PINS_DIR/${hash}.pin"
+                
+                # Atomic write: secure temp file, chmod, then move
+                tmp_file="${pin_file}.tmp.$$"
+                printf '%s' "$content" > "$tmp_file"
+                chmod 600 "$tmp_file"
+                mv -f "$tmp_file" "$pin_file"
             fi
             ;;
     esac
