@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Master Template v2.2
+# Dusky TUI Engine - Master Template v2.3
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / UWSM
 # Description: High-performance, robust TUI for config modification.
 # Features:
 #   - Secure `sed` Injection Prevention
-#   - Automatic Config Backups (.bak)
+#   - Nested Block Support (Fixes "Range Trap")
+#   - Locale Safe (Fixes "Comma Bomb")
 #   - Terminal State Preservation (stty)
 #   - Scrollable Viewport with Indicators
 #   - Mouse Support (SGR 1006)
@@ -14,13 +15,19 @@
 
 set -euo pipefail
 
+# CRITICAL FIX: The "Locale Bomb"
+# Force standard C locale for numeric operations.
+# This prevents awk from outputting commas (0,5) in non-US locales,
+# which would corrupt the config file.
+export LC_NUMERIC=C
+
 # =============================================================================
 # ▼ USER CONFIGURATION (EDIT THIS SECTION) ▼
 # =============================================================================
 
 readonly CONFIG_FILE="${HOME}/.config/hypr/change_me.conf"
 readonly APP_TITLE="Dusky Template"
-readonly APP_VERSION="v2.2"
+readonly APP_VERSION="v2.3"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14      # Rows of items to show before scrolling
@@ -224,12 +231,54 @@ write_value_to_file() {
 
     if [[ -n $block ]]; then
         escape_sed_pattern "$block" safe_block
-        # Robust sed: uses | delimiter, follows symlinks, preserves trailing comments
-        sed --follow-symlinks -i \
-            "/^[[:space:]]*${safe_block}[[:space:]]*{/,/^[[:space:]]*}/ {
-                s|^\([[:space:]]*${safe_key}[[:space:]]*=[[:space:]]*\)\([^#]*\)|\1${safe_val} |
-            }" "$CONFIG_FILE"
+        
+        # CRITICAL FIX: The "Nested Block Range Trap"
+        # We cannot rely on sed range /start/,/}/ because it stops at ANY closing brace,
+        # breaking nested configs (e.g., editing a key inside decoration{...} that follows blur{...}).
+        # Instead, we identify the EXACT start and end lines of the block by counting braces.
+        
+        local start_line
+        # Find the first line where the block starts
+        start_line=$(grep -n "^[[:space:]]*${safe_block}[[:space:]]*{" "$CONFIG_FILE" | head -n1 | cut -d: -f1)
+        
+        if [[ -n $start_line ]]; then
+            local end_line_offset
+            
+            # Count braces starting from the block line to find the matching closing brace
+            end_line_offset=$(tail -n "+$start_line" "$CONFIG_FILE" | awk '
+                BEGIN { depth=0; found=0 }
+                {
+                    txt = $0
+                    sub(/#.*/, "", txt) # Remove comments to avoid false brace counts
+
+                    # Count occurrences of { and }
+                    n_open = gsub(/{/, "&", txt);
+                    n_close = gsub(/}/, "&", txt);
+                    
+                    depth += n_open - n_close;
+                    
+                    # We are in the block once we process the first line (tail guarantees this)
+                    if (NR == 1) found=1
+                    
+                    if (found && depth <= 0) {
+                        print NR
+                        exit
+                    }
+                }
+            ')
+            
+            if [[ -n $end_line_offset ]]; then
+                local -i real_end_line=$(( start_line + end_line_offset - 1 ))
+                
+                # Apply substitution ONLY within the strictly calculated range
+                # Robust sed: uses | delimiter, follows symlinks
+                sed --follow-symlinks -i \
+                    "${start_line},${real_end_line}s|^\([[:space:]]*${safe_key}[[:space:]]*=[[:space:]]*\)\([^#]*\)|\1${safe_val} |" \
+                    "$CONFIG_FILE"
+            fi
+        fi
     else
+        # Global key update (no block context)
         sed --follow-symlinks -i \
             "s|^\([[:space:]]*${safe_key}[[:space:]]*=[[:space:]]*\)\([^#]*\)|\1${safe_val} |" \
             "$CONFIG_FILE"
@@ -272,6 +321,7 @@ modify_value() {
             ;;
         float)
             [[ ! $current =~ ^-?[0-9]*\.?[0-9]+$ ]] && current=${min:-0.0}
+            # Note: LC_NUMERIC=C is set globally, so awk is safe here.
             new_val=$(awk -v c="$current" -v dir="$direction" -v s="${step:-0.1}" \
                           -v mn="$min" -v mx="$max" 'BEGIN {
                 val = c + (dir * s)
@@ -572,17 +622,11 @@ main() {
     command -v awk &>/dev/null || { log_err "Required: awk"; exit 1; }
     command -v sed &>/dev/null || { log_err "Required: sed"; exit 1; }
 
-    # 3. Create Backup
-    local backup_file="${CONFIG_FILE}.bak.$(date +%Y%m%d_%H%M%S)"
-    if ! cp -- "$CONFIG_FILE" "$backup_file"; then
-        log_warn "Failed to create backup at $backup_file"
-    fi
-
-    # 4. Initialization
+    # 3. Initialization
     register_items
     populate_config_cache
 
-    # 5. Save Terminal State
+    # 4. Save Terminal State
     if command -v stty &>/dev/null; then
         ORIGINAL_STTY=$(stty -g 2>/dev/null) || ORIGINAL_STTY=""
     fi
@@ -592,7 +636,7 @@ main() {
 
     local key seq char
 
-    # 6. Event Loop
+    # 5. Event Loop
     while true; do
         draw_ui
 
