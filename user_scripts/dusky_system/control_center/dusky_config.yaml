@@ -64,11 +64,11 @@ pages:
         terminal: false
     - type: button
       properties:
-        title: Files
-        icon: system-file-manager-symbolic
+        title: foot
+        icon: terminal-symbolic
       on_press:
         type: exec
-        command: thunar
+        command: Foot Term
         terminal: false
   - type: section
     properties:
