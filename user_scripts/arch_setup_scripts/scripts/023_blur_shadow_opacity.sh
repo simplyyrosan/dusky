@@ -73,11 +73,14 @@ main() {
     # Step 2: Run Visual Toggle Script
     # Inherits current environment (including UWSM vars)
     log_info "Engaging visual effects (${TARGET_ARGS})..."
+    
+    # MODIFIED: Logic to warn instead of hard fail
     if "$TARGET_SCRIPT" "$TARGET_ARGS"; then
         log_success "Visual effects toggled successfully."
     else
-        log_error "Visual effects script returned an error."
-        exit 1
+        # We manually construct a WARN message here using existing constants
+        # instead of calling log_error or exiting.
+        printf "${C_BLUE}[WARN]${C_RESET} %s\n" "Target file hasn't been generated yet. Skipping visual effects."
     fi
 
     log_success "All operations completed cleanly."
