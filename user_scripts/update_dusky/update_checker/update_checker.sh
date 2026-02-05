@@ -349,50 +349,80 @@ load_commits() {
 # =============================================================================
 
 draw_ui() {
-    local buf="" pad=""
-    local -i vlen lpad rpad vstart vend i
+    local buf="" pad_buf=""
+    local -i visible_len left_pad right_pad
+    local -i vstart vend i
 
     buf+="$CUR_HOME"
     buf+="${C_MAGENTA}┌${H_LINE}┐${C_RESET}"$'\n'
 
-    # Title line
-    local raw="${APP_TITLE} Local: #${LOCAL_REV} vs Remote: #${REMOTE_REV}"
-    vlen=${#raw}
-    lpad=$(( (BOX_INNER_WIDTH - vlen) / 2 ))
-    rpad=$(( BOX_INNER_WIDTH - vlen - lpad ))
-    printf -v pad '%*s' "$lpad" ''
-    buf+="${C_MAGENTA}│${pad}${C_WHITE}${APP_TITLE} ${C_GREY}Local: #${LOCAL_REV} vs Remote: #${REMOTE_REV}${C_WHITE}"
-    printf -v pad '%*s' "$rpad" ''
-    buf+="${pad}${C_MAGENTA}│${C_RESET}"$'\n'
+    # -------------------------------------------------------------------------
+    # TITLE LINE - using dusky_tui.sh template dynamic centering logic
+    # -------------------------------------------------------------------------
+    local plain_title="${APP_TITLE} Local: #${LOCAL_REV} vs Remote: #${REMOTE_REV}"
+    visible_len=${#plain_title}
+    
+    left_pad=$(( (BOX_INNER_WIDTH - visible_len) / 2 ))
+    # Safety clamp for padding
+    (( left_pad < 0 )) && left_pad=0
+    
+    right_pad=$(( BOX_INNER_WIDTH - visible_len - left_pad ))
+    (( right_pad < 0 )) && right_pad=0
 
-    # Status line
-    local stats=""
+    printf -v pad_buf '%*s' "$left_pad" ''
+    buf+="${C_MAGENTA}│${pad_buf}${C_WHITE}${APP_TITLE} ${C_GREY}Local: #${LOCAL_REV} vs Remote: #${REMOTE_REV}"
+    
+    printf -v pad_buf '%*s' "$right_pad" ''
+    buf+="${pad_buf}${C_MAGENTA}│${C_RESET}"$'\n'
+
+    # -------------------------------------------------------------------------
+    # STATUS LINE - FIXED: Manual length calculation for pixel-perfect alignment
+    # -------------------------------------------------------------------------
+    local stats="" plain_stats=""
     case "$FETCH_STATUS" in
         FAIL)
             stats="${C_RED}Fetch Failed: ${FETCH_INFO:0:45}${C_RESET}"
+            plain_stats="Fetch Failed: ${FETCH_INFO:0:45}"
             ;;
         NO_UPSTREAM)
             stats="${C_RED}Status: No Upstream Branch${C_RESET}"
+            plain_stats="Status: No Upstream Branch"
             ;;
         *)
             case "${COMMIT_HASHES[0]:-}" in
-                HEAD) stats="${C_GREEN}Status: Up to date${C_RESET}" ;;
-                WARN) stats="${C_YELLOW}Status: Log Error${C_RESET}" ;;
-                ERR)  stats="${C_RED}Status: Error${C_RESET}" ;;
-                *)    stats="${C_YELLOW}Commits Behind: ${TOTAL_COMMITS}${C_RESET}" ;;
+                HEAD) 
+                    stats="${C_GREEN}Status: Up to date${C_RESET}" 
+                    plain_stats="Status: Up to date"
+                    ;;
+                WARN) 
+                    stats="${C_YELLOW}Status: Log Error${C_RESET}" 
+                    plain_stats="Status: Log Error"
+                    ;;
+                ERR)  
+                    stats="${C_RED}Status: Error${C_RESET}" 
+                    plain_stats="Status: Error"
+                    ;;
+                *)    
+                    stats="${C_YELLOW}Commits Behind: ${TOTAL_COMMITS}${C_RESET}" 
+                    plain_stats="Commits Behind: ${TOTAL_COMMITS}"
+                    ;;
             esac
             ;;
     esac
 
-    local plain_stats=""
-    _strip_ansi "$stats" plain_stats
-    local -i pad_len=$(( BOX_INNER_WIDTH - ${#plain_stats} - 1 ))
-    (( pad_len < 0 )) && pad_len=0
-    printf -v pad '%*s' "$pad_len" ''
-    buf+="${C_MAGENTA}│ ${stats}${pad}${C_MAGENTA}│${C_RESET}"$'\n'
+    # Calculate right padding based on explicit plain text length
+    # The visible content is " " + plain_stats
+    visible_len=$(( ${#plain_stats} + 1 ))
+    right_pad=$(( BOX_INNER_WIDTH - visible_len ))
+    (( right_pad < 0 )) && right_pad=0
+
+    printf -v pad_buf '%*s' "$right_pad" ''
+    buf+="${C_MAGENTA}│ ${stats}${pad_buf}${C_MAGENTA}│${C_RESET}"$'\n'
     buf+="${C_MAGENTA}└${H_LINE}┘${C_RESET}"$'\n'
 
-    # Scroll bounds
+    # -------------------------------------------------------------------------
+    # SCROLL BOUNDS & INDICATORS
+    # -------------------------------------------------------------------------
     if (( TOTAL_COMMITS > 0 )); then
         (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
         (( SELECTED_ROW >= TOTAL_COMMITS )) && SELECTED_ROW=$(( TOTAL_COMMITS - 1 ))
