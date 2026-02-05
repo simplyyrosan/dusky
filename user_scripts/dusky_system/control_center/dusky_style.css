@@ -601,3 +601,18 @@ flowboxchild:selected {
 .subtle-border {
     border: 1px solid alpha(@borders, 0.25);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   BADGE NOTIFICATION
+   ───────────────────────────────────────────────────────────────────────────── */
+.badge-label {
+    background-color: @error_bg_color;
+    color: @error_fg_color;
+    border-radius: 99px;
+    padding: 4px 3px 3px 4px;
+    font-size: 14px;
+    font-weight: 900;
+    min-width: 18px;
+    min-height: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}

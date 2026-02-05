@@ -67,6 +67,7 @@ pages:
         title: Dusky Update
         icon: system-software-update-symbolic
         style: suggested
+        badge_file: ~/.config/dusky/settings/dusky_update_behind_commit
       on_press:
         type: exec
         command: kitty --class update_dusky.sh --title "System Updater" --hold sh -c "$HOME/user_scripts/update_dusky/update_dusky.sh"

@@ -206,6 +206,7 @@ class RowProperties(TypedDict, total=False):
     debounce: bool
     options: list[str]  # Added for SelectionRow
     placeholder: str    # Added for EntryRow logic
+    badge_file: str     # ADDED: Path to file containing badge count
 
 
 class RowContext(TypedDict, total=False):
@@ -928,8 +929,9 @@ class SliderRow(BaseActionRow):
             orientation=Gtk.Orientation.HORIZONTAL, adjustment=adj
         )
         self.slider.set_valign(Gtk.Align.CENTER)
-        self.slider.set_hexpand(True)
+        self.slider.set_hexpand(False)  # DISABLED EXPANSION
         self.slider.set_draw_value(False)
+        self.slider.set_size_request(250, -1) # FIXED WIDTH
         self.slider.connect("value-changed", self._on_value_changed)
         self.add_suffix(self.slider)
 
@@ -1363,7 +1365,10 @@ class GridCardBase(Gtk.Button):
 
 
 class GridCard(DynamicIconMixin, GridCardBase):
-    """Grid card that executes an action when clicked."""
+    """
+    Grid card that executes an action when clicked.
+    Supports 'badge_file' property to show a notification count.
+    """
 
     __gtype_name__ = "DuskyGridCard"
 
@@ -1383,8 +1388,86 @@ class GridCard(DynamicIconMixin, GridCardBase):
         self.set_child(box)
         self.connect("clicked", self._on_clicked)
 
+        # BADGE LOGIC
+        self.badge_label: Gtk.Label | None = None
+        if badge_path := properties.get("badge_file"):
+            # If a badge is requested, wrap the existing content box in an Overlay
+            # and place the badge label on top.
+            
+            # Detach current content
+            self.set_child(None)
+            
+            overlay = Gtk.Overlay()
+            overlay.set_child(box)
+            
+            self.badge_label = Gtk.Label(css_classes=["badge-label"])
+            self.badge_label.set_halign(Gtk.Align.END)
+            self.badge_label.set_valign(Gtk.Align.START)
+            self.badge_label.set_margin_top(4)
+            self.badge_label.set_margin_end(4)
+            self.badge_label.set_visible(False)
+            
+            overlay.add_overlay(self.badge_label)
+            self.set_child(overlay)
+            
+            # Start monitoring the badge file
+            self._start_badge_monitor(str(badge_path))
+
         if _is_dynamic_icon(icon_conf) and isinstance(icon_conf, dict):
             self._start_icon_update_loop(icon_conf)
+
+    def _start_badge_monitor(self, path_str: str) -> None:
+        """Start periodic check of the badge file."""
+        self._check_badge_tick(path_str) # Initial check
+        
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return
+            # Using update_source_id as it's free in this class
+            self._state.update_source_id = GLib.timeout_add_seconds(
+                DEFAULT_INTERVAL_SECONDS, self._check_badge_tick, path_str
+            )
+
+    def _check_badge_tick(self, path_str: str) -> bool:
+        """Timeout callback to schedule background file read."""
+        if not self.get_mapped():
+            return GLib.SOURCE_CONTINUE
+
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+        
+        _submit_task_safe(lambda: self._fetch_badge_async(path_str), self._state)
+        return GLib.SOURCE_CONTINUE
+
+    def _fetch_badge_async(self, path_str: str) -> None:
+        """Read file in background thread."""
+        count_text: str | None = None
+        try:
+            path = _expand_path(path_str)
+            if path.exists():
+                content = path.read_text(encoding="utf-8").strip()
+                if content.isdigit() and int(content) > 0:
+                    count_text = content
+        except Exception:
+            pass # Fail silently for badge
+        
+        GLib.idle_add(self._update_badge_ui, count_text)
+
+    def _update_badge_ui(self, text: str | None) -> bool:
+        """Update badge visibility on main thread."""
+        with self._state.lock:
+            if self._state.is_destroyed:
+                return GLib.SOURCE_REMOVE
+        
+        if self.badge_label:
+            if text:
+                self.badge_label.set_label(text)
+                self.badge_label.set_visible(True)
+            else:
+                self.badge_label.set_visible(False)
+        
+        return GLib.SOURCE_REMOVE
 
     def _on_clicked(self, _button: Gtk.Button) -> None:
         """Handle card click: execute or redirect."""
