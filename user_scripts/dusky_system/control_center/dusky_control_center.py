@@ -220,6 +220,7 @@ class RowContext(TypedDict):
     toast_overlay: Adw.ToastOverlay | None
     nav_view: Adw.NavigationView | None
     builder_func: Callable[..., Adw.NavigationPage] | None
+    path: list[str]  # Breadcrumb path for navigation depth
 
 
 class ConfigLoadResult(TypedDict):
@@ -464,6 +465,7 @@ class DuskyControlCenter(Adw.Application):
         self,
         nav_view: Adw.NavigationView | None = None,
         builder_func: Callable[..., Adw.NavigationPage] | None = None,
+        path: list[str] | None = None,
     ) -> RowContext:
         """
         Construct the shared context dictionary for child widget builders.
@@ -475,6 +477,7 @@ class DuskyControlCenter(Adw.Application):
             "toast_overlay": self._toast_overlay,
             "nav_view": nav_view,
             "builder_func": builder_func,
+            "path": path or [],
         }
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -711,7 +714,7 @@ class DuskyControlCenter(Adw.Application):
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
-        # Add sidebar toggle to search page as well for consistency
+        # Add sidebar toggle to search page (always at root level)
         header.pack_start(self._create_sidebar_toggle_button())
         toolbar.add_top_bar(header)
 
@@ -995,6 +998,8 @@ class DuskyControlCenter(Adw.Application):
         self._sidebar_list = Gtk.ListBox(css_classes=["sidebar-listbox"])
         self._sidebar_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self._sidebar_list.connect("row-selected", self._on_row_selected)
+        # Handle re-clicking the same row to reset navigation
+        self._sidebar_list.connect("row-activated", self._on_row_activated)
 
         scroll = Gtk.ScrolledWindow(vexpand=True)
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -1021,6 +1026,22 @@ class DuskyControlCenter(Adw.Application):
         pages = self._state.config.get("pages", [])
         if 0 <= idx < len(pages):
             page_name = f"{PAGE_PREFIX}{idx}"
+            root_tag = f"root_{idx}"
+            self._switch_to_page_and_reset(page_name, root_tag)
+
+    def _on_row_activated(self, listbox: Gtk.ListBox, row: Gtk.ListBoxRow) -> None:
+        """Handle sidebar row activation (clicking already selected row)."""
+        self._on_row_selected(listbox, row)
+
+    def _switch_to_page_and_reset(self, page_name: str, root_tag: str) -> None:
+        """Switch to the page and pop navigation to root."""
+        if self._stack:
+            # If the page is a NavigationView, reset it to root
+            if child := self._stack.get_child_by_name(page_name):
+                if isinstance(child, Adw.NavigationView):
+                    # Pop until we reach the root tag
+                    child.pop_to_tag(root_tag)
+
             self._stack.set_visible_child_name(page_name)
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -1041,6 +1062,7 @@ class DuskyControlCenter(Adw.Application):
         for idx, page in enumerate(pages):
             title = str(page.get("title", "Untitled"))
             icon = str(page.get("icon", ICON_DEFAULT))
+            root_tag = f"root_{idx}"
 
             # Create sidebar row
             row = self._create_sidebar_row(title, icon)
@@ -1054,8 +1076,15 @@ class DuskyControlCenter(Adw.Application):
 
             # Create content page
             nav = Adw.NavigationView()
-            ctx = self._get_context(nav_view=nav, builder_func=self._build_nav_page)
-            root = self._build_nav_page(title, page.get("layout", []), ctx)
+            
+            ctx = self._get_context(
+                nav_view=nav, 
+                builder_func=self._build_nav_page,
+                path=[title]
+            )
+            
+            # Pass root_tag to ensure we can pop back to this specific page
+            root = self._build_nav_page(title, page.get("layout", []), ctx, root_tag=root_tag)
             nav.add(root)
 
             if self._stack:
@@ -1094,18 +1123,36 @@ class DuskyControlCenter(Adw.Application):
         self, 
         title: str, 
         layout: list[ConfigSection], 
-        ctx: RowContext
+        ctx: RowContext,
+        root_tag: str | None = None
     ) -> Adw.NavigationPage:
         """
         Build a navigation page with toolbar and preferences content.
         """
-        tag = title.lower().replace(" ", "-")
+        # Determine Path and Tag
+        path = ctx.get("path", [title])
+        tag = root_tag if root_tag else f"page_{len(path)}_{title.replace(' ', '_')}"
+        
         page = Adw.NavigationPage(title=title, tag=tag)
 
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
-        # Add the sidebar toggle button here
-        header.pack_start(self._create_sidebar_toggle_button())
+        
+        # LOGIC: Sidebar Toggle
+        # Only show on root level (path length 1) to keep subpages clean
+        if len(path) == 1:
+            header.pack_start(self._create_sidebar_toggle_button())
+        
+        # LOGIC: Breadcrumbs / Title
+        # Use Adw.WindowTitle to show depth clearly
+        window_title = Adw.WindowTitle(title=title)
+        if len(path) > 1:
+            # Subpage: Show breadcrumb trail in subtitle
+            # e.g. "Home › Network"
+            breadcrumb_text = " › ".join(path[:-1])
+            window_title.set_subtitle(breadcrumb_text)
+            
+        header.set_title_widget(window_title)
         toolbar.add_top_bar(header)
 
         pref_page = Adw.PreferencesPage()

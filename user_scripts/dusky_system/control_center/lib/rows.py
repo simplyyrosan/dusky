@@ -222,6 +222,7 @@ class RowContext(TypedDict, total=False):
     toast_overlay: Adw.ToastOverlay | None
     nav_view: Adw.NavigationView | None
     builder_func: Callable[..., Adw.NavigationPage] | None
+    path: NotRequired[list[str]] # Path context for breadcrumbs
 
 
 @dataclass(slots=True)
@@ -1529,8 +1530,16 @@ class NavigationRow(BaseActionRow):
         """Handle row activation to push a subpage."""
         if self.nav_view and self.builder_func:
             title = str(self.properties.get("title", "Subpage"))
+            
+            # Update path context for the subpage
+            current_path = self.context.get("path", [])
+            new_path = list(current_path) + [title]
+            
+            new_ctx = self.context.copy()
+            new_ctx["path"] = new_path
+            
             self.nav_view.push(
-                self.builder_func(title, self.layout_data, self.context)
+                self.builder_func(title, self.layout_data, new_ctx)
             )
 
 
