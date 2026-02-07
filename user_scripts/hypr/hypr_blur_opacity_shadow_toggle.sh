@@ -20,6 +20,7 @@ set -o pipefail
 
 # --- Configuration ---
 readonly CONFIG_FILE="${HOME}/.config/hypr/edit_here/source/appearance.conf"
+readonly STATE_FILE="${HOME}/.config/dusky/settings/opacity_blur"
 
 # Visual Constants
 readonly OP_ACTIVE_ON="0.8"
@@ -132,19 +133,26 @@ esac
 
 # --- Define Values Based on Target State ---
 
-declare NEW_ENABLED NEW_ACTIVE NEW_INACTIVE NOTIFY_MSG
+declare NEW_ENABLED NEW_ACTIVE NEW_INACTIVE NOTIFY_MSG STATE_STRING
 
 if [[ "$TARGET_STATE" == "on" ]]; then
     NEW_ENABLED="true"
     NEW_ACTIVE="$OP_ACTIVE_ON"
     NEW_INACTIVE="$OP_INACTIVE_ON"
     NOTIFY_MSG="Visuals: Max (Blur/Shadow ON)"
+    STATE_STRING="True"
 else
     NEW_ENABLED="false"
     NEW_ACTIVE="$OP_ACTIVE_OFF"
     NEW_INACTIVE="$OP_INACTIVE_OFF"
     NOTIFY_MSG="Visuals: Performance (Blur/Shadow OFF)"
+    STATE_STRING="False"
 fi
+
+# --- Update State File ---
+
+mkdir -p "$(dirname "$STATE_FILE")"
+printf '%s' "$STATE_STRING" > "$STATE_FILE"
 
 # --- Update Config File (Persistent Storage) ---
 
