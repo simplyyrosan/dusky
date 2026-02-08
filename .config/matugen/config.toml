@@ -1,6 +1,10 @@
 [config]
 # ...
 
+[templates.master_dump]
+input_path = "~/.config/matugen/templates/master-dump.jsonl"
+output_path = "~/.config/matugen/generated/master-dump.jsonl"
+
 # -----------------------------------------------------------------------------
 # GTK & Qt
 # -----------------------------------------------------------------------------
