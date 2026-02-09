@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Master Template v3.2.3 (Stress Test Hardened)
+# Dusky TUI Engine - Hybrid Master v3.3.2 (Space Bug Fix)
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / UWSM / Wayland
-# Requires: Bash 5.0+, GNU sed, GNU awk
 #
-# v3.2.3 CHANGELOG:
-#   - FIX: Lowered ADJUST_THRESHOLD to 39 to fix mouse hitbox on value start.
-#   - IMP: Increased float precision to %.6g to prevent rounding errors.
-# v3.2.2 CHANGELOG:
-#   - FIX: Correctly parse nested configuration blocks.
+# HYBRID SPECIFICATION:
+#   - LOGIC CORE: v2.8.2 (Restored to handle split/nested blocks correctly)
+#   - INTERFACE:  v3.2.4 (Modern, stable, high-precision, crash-proof)
+#   - SAFETY:     v3.2.4 (Bash 5.0+, Scoped Locales, Signal Traps)
+#
+# v3.3.2 CHANGELOG:
+#   - FIX: Removed trailing space in sed replacement that caused whitespace 
+#     accumulation after multiple edits.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
@@ -18,32 +20,47 @@ set -euo pipefail
 # ▼ USER CONFIGURATION (EDIT THIS SECTION) ▼
 # =============================================================================
 
+# POINT THIS TO YOUR REAL CONFIG FILE
 readonly CONFIG_FILE="${HOME}/.config/hypr/change_me.conf"
-readonly APP_TITLE="Dusky Template"
-readonly APP_VERSION="v3.2.3"
+readonly APP_TITLE="Input Config Editor"
+readonly APP_VERSION="v3.3.2 (Hybrid)"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14
 declare -ri BOX_INNER_WIDTH=76
-# UPDATED: Set to 39 so clicks on the first character of the value register correctly
-declare -ri ADJUST_THRESHOLD=39
+declare -ri ADJUST_THRESHOLD=38 # Kept v3.2.4 Fix: Better mouse hitbox
 declare -ri ITEM_PADDING=32
+
+declare -ri HEADER_ROWS=4
+declare -ri TAB_ROW=3
+declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 2 ))
 
 declare -ra TABS=("General" "Input" "Display" "Misc")
 
 # Item Registration
+# NOTE: For nested blocks (e.g. input { touchpad }), use the LEAF name "touchpad".
 register_items() {
+    # Tab 0: General
     register 0 "Enable Logs"    'logs_enabled|bool|general|||'          "true"
     register 0 "Timeout (ms)"   'timeout|int|general|0|1000|50'        "100"
+    
+    # Tab 1: Input
     register 1 "Sensitivity"    'sensitivity|float|input|-1.0|1.0|0.1' "0.0"
-    register 2 "Accel Profile"  'accel_profile|cycle|input|flat,adaptive,custom||' "adaptive"
+    register 1 "Accel Profile"  'accel_profile|cycle|input|flat,adaptive,custom||' "adaptive"
+    
+    # Tab 2: Display
     register 2 "Border Size"    'border_size|int||0|10|1'              "2"
+    register 2 "Blur Enabled"   'blur|bool|decoration|||'              "true"
+    
+    # Tab 3: Misc
     register 3 "Shadow Color"   'col.shadow|cycle|general|0xee1a1a1a,0xff000000||' "0xee1a1a1a"
 }
 
 # Post-Write Hook
 post_write_action() {
-    : # Example: pgrep -x waybar >/dev/null && killall -SIGUSR2 waybar
+    # Example: Reload Waybar or Hyprland
+    # pgrep -x waybar >/dev/null && killall -SIGUSR2 waybar
+    : 
 }
 
 # =============================================================================
@@ -55,10 +72,6 @@ declare _h_line_buf
 printf -v _h_line_buf '%*s' "$BOX_INNER_WIDTH" ''
 readonly H_LINE="${_h_line_buf// /─}"
 unset _h_line_buf
-
-declare -ri HEADER_ROWS=4
-declare -ri TAB_ROW=3
-declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 2 ))
 
 # --- ANSI Constants ---
 readonly C_RESET=$'\033[0m'
@@ -119,35 +132,33 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# --- Sed Escaping ---
+# --- Regex Helpers (v2.8.2 Logic Compatible) ---
 
 escape_sed_replacement() {
-    local _esc=$1
-    local -n _out=$2
-    _esc=${_esc//\\/\\\\}
-    _esc=${_esc//|/\\|}
-    _esc=${_esc//&/\\&}
-    _esc=${_esc//$'\n'/\\n}
-    _out=$_esc
+    local _esc_input=$1
+    local -n _esc_out_ref=$2
+    _esc_input=${_esc_input//\\/\\\\}
+    _esc_input=${_esc_input//|/\\|}
+    _esc_input=${_esc_input//&/\\&}      # Kept security fix for &
+    _esc_input=${_esc_input//$'\n'/\\n}
+    _esc_out_ref=$_esc_input
 }
 
 escape_sed_pattern() {
-    local _esc=$1
-    local -n _out=$2
-    _esc=${_esc//\\/\\\\}
-    _esc=${_esc//|/\\|}
-    _esc=${_esc//./\\.}
-    _esc=${_esc//\*/\\*}
-    _esc=${_esc//\[/\\[}
-    _esc=${_esc//\]/\\]}
-    _esc=${_esc//^/\\^}
-    _esc=${_esc//\$/\\\$}
-    _esc=${_esc//\{/\\{}
-    _esc=${_esc//\}/\\}}
-    _out=$_esc
+    local _esc_input=$1
+    local -n _esc_out_ref=$2
+    _esc_input=${_esc_input//\\/\\\\}
+    _esc_input=${_esc_input//|/\\|}
+    _esc_input=${_esc_input//./\\.}
+    _esc_input=${_esc_input//\*/\\*}
+    _esc_input=${_esc_input//\[/\\[}
+    _esc_input=${_esc_input//\]/\\]}
+    _esc_input=${_esc_input//^/\\^}
+    _esc_input=${_esc_input//\$/\\\$}
+    _esc_out_ref=$_esc_input
 }
 
-# --- Core Engine ---
+# --- Core Logic Engine (v2.8.2 Logic / v3.2.4 Hygiene) ---
 
 register() {
     local -i tab_idx=$1
@@ -172,15 +183,18 @@ register() {
     _reg_tab_ref+=("$label")
 }
 
+# The "Brain" from v2.8.2 - Handles split blocks
+# UPDATE v3.3.1: Scoped LC_NUMERIC=C to awk command (Hygiene Fix)
 populate_config_cache() {
     CONFIG_CACHE=()
     local key_part value_part key_name
 
-    while IFS='=' read -r key_part value_part || [[ -n "${key_part:-}" ]]; do
-        [[ -z "${key_part:-}" ]] && continue
+    while IFS='=' read -r key_part value_part || [[ -n ${key_part:-} ]]; do
+        [[ -z ${key_part:-} ]] && continue
         CONFIG_CACHE["$key_part"]=$value_part
+
         key_name=${key_part%%|*}
-        if [[ -z "${CONFIG_CACHE["${key_name}|"]+set}" ]]; then
+        if [[ -z ${CONFIG_CACHE["${key_name}|"]:-} ]]; then
             CONFIG_CACHE["${key_name}|"]=$value_part
         fi
     done < <(LC_NUMERIC=C awk '
@@ -191,7 +205,6 @@ populate_config_cache() {
             sub(/#.*/, "", line)
 
             tmpline = line
-            # Stack push logic
             while (match(tmpline, /[a-zA-Z0-9_.:-]+[[:space:]]*\{/)) {
                 block_str = substr(tmpline, RSTART, RLENGTH)
                 sub(/[[:space:]]*\{/, "", block_str)
@@ -207,129 +220,131 @@ populate_config_cache() {
                     val = substr(line, eq_pos + 1)
                     gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
                     gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-                    gsub(/[[:space:]]*\}[[:space:]]*$/, "", val)
                     if (key != "") {
-                        # RECONSTRUCT FULL NESTED PATH
-                        current_block = ""
-                        for (i = 1; i <= depth; i++) {
-                            if (i == 1) current_block = block_stack[i]
-                            else current_block = current_block " { " block_stack[i]
-                        }
-                        # Append closing braces for deep nesting to match "system { kernel }" style
-                        for (i = 1; i < depth; i++) {
-                            current_block = current_block " }"
-                        }
-                        
+                        current_block = (depth > 0) ? block_stack[depth] : ""
                         print key "|" current_block "=" val
                     }
                 }
             }
 
-            # Stack pop logic
             n = gsub(/\}/, "}", line)
             while (n > 0 && depth > 0) { depth--; n-- }
         }
     ' "$CONFIG_FILE")
 }
 
+# The "Seeker" from v2.8.2 - Correctly finds keys in split/nested blocks
+# UPDATE v3.3.1: Scoped LC_NUMERIC=C to awk command (Hygiene Fix)
 find_key_line_in_block() {
     local block_name=$1 key_name=$2 file=$3
 
     LC_NUMERIC=C awk -v target_block="$block_name" -v target_key="$key_name" '
-    BEGIN { depth = 0; }
+    BEGIN {
+        depth = 0
+        in_target = 0
+        target_depth = 0
+        found = 0
+    }
     {
-        clean = $0; sub(/#.*/, "", clean)
+        line = $0
+        clean = $0
+        sub(/#.*/, "", clean)
+
         tmpline = clean
-        
-        # Track depth and block stack
         while (match(tmpline, /[a-zA-Z0-9_.:-]+[[:space:]]*\{/)) {
             block_str = substr(tmpline, RSTART, RLENGTH)
             sub(/[[:space:]]*\{/, "", block_str)
             depth++
             block_stack[depth] = block_str
+
+            if (block_str == target_block && !in_target) {
+                in_target = 1
+                target_depth = depth
+            }
             tmpline = substr(tmpline, RSTART + RLENGTH)
         }
 
-        # Check for key match
-        if (clean ~ /=/) {
+        if (in_target && clean ~ /=/) {
             eq_pos = index(clean, "=")
             if (eq_pos > 0) {
                 k = substr(clean, 1, eq_pos - 1)
                 gsub(/^[[:space:]]+|[[:space:]]+$/, "", k)
                 if (k == target_key) {
-                    # RECONSTRUCT CURRENT PATH TO COMPARE
-                    current_path = ""
-                    for (i = 1; i <= depth; i++) {
-                        if (i == 1) current_path = block_stack[i]
-                        else current_path = current_path " { " block_stack[i]
-                    }
-                    for (i = 1; i < depth; i++) {
-                        current_path = current_path " }"
-                    }
-
-                    if (current_path == target_block) {
-                        print NR
-                    }
+                    print NR
+                    found = 1
                 }
             }
         }
-        
-        # Pop stack
+
         n = gsub(/\}/, "}", clean)
-        while (n > 0 && depth > 0) { depth--; n-- }
+        while (n > 0 && depth > 0) {
+            if (in_target && depth == target_depth) {
+                in_target = 0
+                target_depth = 0
+            }
+            depth--
+            n--
+        }
     }
     ' "$file"
 }
 
+# The "Writer" from v2.8.2
 write_value_to_file() {
     local key=$1 new_val=$2 block=${3:-}
-    local current_val=${CONFIG_CACHE["${key}|${block}"]:-}
-
+    local current_val=${CONFIG_CACHE["$key|$block"]:-}
+    
     [[ "$current_val" == "$new_val" ]] && return 0
 
     local safe_val safe_sed_key
     escape_sed_replacement "$new_val" safe_val
     escape_sed_pattern "$key" safe_sed_key
-    local sed_repl="\\1${safe_val} "
 
     if [[ -n "$block" ]]; then
         local target_output
         target_output=$(find_key_line_in_block "$block" "$key" "$CONFIG_FILE")
-        [[ -z "$target_output" ]] && return 1
 
-        local sed_script="" target_line
+        if [[ -z "$target_output" ]]; then
+            return 1
+        fi
+        
+        local target_line
         while IFS= read -r target_line; do
             [[ ! "$target_line" =~ ^[0-9]+$ ]] && continue
             (( target_line == 0 )) && continue
-            sed_script+="${target_line}s|^\\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\\)[^#]*|${sed_repl}|;"
-        done <<< "$target_output"
 
-        if [[ -n "$sed_script" ]]; then
-            sed --follow-symlinks -i "$sed_script" "$CONFIG_FILE"
-        fi
+            # FIX: Removed the trailing space after ${safe_val}
+            sed --follow-symlinks -i \
+                "${target_line}s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" \
+                "$CONFIG_FILE"
+        done <<< "$target_output"
     else
+        # FIX: Removed the trailing space after ${safe_val}
         sed --follow-symlinks -i \
-            "s|^\\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\\)[^#]*|${sed_repl}|" \
+            "s|^\([[:space:]]*${safe_sed_key}[[:space:]]*=[[:space:]]*\)[^#]*|\1${safe_val}|" \
             "$CONFIG_FILE"
     fi
 
-    CONFIG_CACHE["${key}|${block}"]=$new_val
+    CONFIG_CACHE["$key|$block"]=$new_val
     if [[ -z "$block" ]]; then
-        CONFIG_CACHE["${key}|"]=$new_val
+        CONFIG_CACHE["$key|"]=$new_val
     fi
     return 0
 }
 
+# Bridging the Cache formats
 load_tab_values() {
     local -n _ltv_items_ref="TAB_ITEMS_${CURRENT_TAB}"
     local item key type block val
 
     for item in "${_ltv_items_ref[@]}"; do
         IFS='|' read -r key type block _ _ _ <<< "${ITEM_MAP["${CURRENT_TAB}::${item}"]}"
-        val=${CONFIG_CACHE["${key}|${block}"]:-}
+        
+        val=${CONFIG_CACHE["$key|$block"]:-}
         if [[ -z "$val" && -z "$block" ]]; then
-            val=${CONFIG_CACHE["${key}|"]:-}
+            val=${CONFIG_CACHE["$key|"]:-}
         fi
+        
         if [[ -z "$val" ]]; then
             VALUE_CACHE["${CURRENT_TAB}::${item}"]=$UNSET_MARKER
         else
@@ -362,7 +377,7 @@ modify_value() {
             ;;
         float)
             if [[ ! "$current" =~ ^-?[0-9]*\.?[0-9]+$ ]]; then current=${min:-0.0}; fi
-            # UPDATED: %.6g for better precision support
+            # Using v3.2.4 improved precision logic (%.6g)
             new_val=$(LC_NUMERIC=C awk -v c="$current" -v dir="$direction" -v s="${step:-0.1}" \
                           -v mn="$min" -v mx="$max" 'BEGIN {
                 val = c + (dir * s)
@@ -420,6 +435,8 @@ reset_defaults() {
     (( any_written )) && post_write_action
     return 0
 }
+
+# --- UI Rendering (v3.2.4 Modern) ---
 
 draw_ui() {
     local buf="" pad_buf="" padded_item="" item val display
@@ -531,6 +548,8 @@ draw_ui() {
     printf '%s' "$buf"
 }
 
+# --- Input Handling (v3.2.4 Modern) ---
+
 navigate() {
     local -i dir=$1
     local -n _nav_items_ref="TAB_ITEMS_${CURRENT_TAB}"
@@ -545,8 +564,8 @@ navigate_page() {
     local -i count=${#_navp_items_ref[@]}
     (( count == 0 )) && return 0
     SELECTED_ROW=$(( SELECTED_ROW + dir * MAX_DISPLAY_ROWS ))
-    (( SELECTED_ROW < 0 )) && SELECTED_ROW=0
-    (( SELECTED_ROW >= count )) && SELECTED_ROW=$(( count - 1 ))
+    if (( SELECTED_ROW < 0 )); then SELECTED_ROW=0; fi
+    if (( SELECTED_ROW >= count )); then SELECTED_ROW=$(( count - 1 )); fi
 }
 
 navigate_end() {
@@ -587,6 +606,7 @@ handle_mouse() {
     local -i button x y i start end
     local type zone
 
+    # Kept v3.2.4 Input Parsing (Fast String Stripping)
     local body=${input#'[<'}
     [[ "$body" == "$input" ]] && return 0
     local terminator=${body: -1}
@@ -650,7 +670,7 @@ main() {
     fi
 
     # Auto-generate dummy config if missing
-    generate_dummy_config
+    # generate_dummy_config
 
     if [[ ! -f "$CONFIG_FILE" ]]; then log_err "Config not found: ${CONFIG_FILE}"; exit 1; fi
     if [[ ! -r "$CONFIG_FILE" ]]; then log_err "Config not readable: ${CONFIG_FILE}"; exit 1; fi
