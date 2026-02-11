@@ -1,29 +1,21 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-# Dusky TUI Engine - Master v3.9.0
+# Dusky TUI Engine - Master v3.9.0 (EXTREME STRESS EDITION)
 # -----------------------------------------------------------------------------
 # Target: Arch Linux / Hyprland / UWSM / Wayland
-#
-# v3.9.0 CHANGELOG:
-#   - CRITICAL: Replaced sed-based writes with atomic awk processing.
-#   - FIX: Preserves symlinks during write (cat > target instead of mv).
-#   - FIX: Correctly handles brace counting in commented lines.
-#   - FIX: Robust strip_ansi using extended globbing for SGR/OSC.
-#   - FIX: Hardened integer coercion against octal interpretation errors.
-#   - OPTIM: Removed O(n^2) file I/O operations.
 # -----------------------------------------------------------------------------
 
 set -euo pipefail
 shopt -s extglob
 
 # =============================================================================
-# ▼ USER CONFIGURATION (EDIT THIS SECTION) ▼
+# ▼ USER CONFIGURATION (STRESS TEST GENERATOR) ▼
 # =============================================================================
 
-# POINT THIS TO YOUR REAL CONFIG FILE
-declare -r CONFIG_FILE="${HOME}/.config/hypr/change_me.conf"
-declare -r APP_TITLE="Input Config Editor"
-declare -r APP_VERSION="v3.9.0 (Hardened)"
+# CONFIGURATION
+declare -r CONFIG_FILE="./stress_test_extreme.conf"
+declare -r APP_TITLE="EXTREME STRESS SUITE"
+declare -r APP_VERSION="v3.9.0 (MAX_LOAD)"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14
@@ -35,41 +27,188 @@ declare -ri HEADER_ROWS=4
 declare -ri TAB_ROW=3
 declare -ri ITEM_START_ROW=$(( HEADER_ROWS + 1 ))
 
-declare -ra TABS=("General" "Input" "Display" "Misc")
+# Defined Tabs (6 Tabs to test overflow and rendering)
+declare -ra TABS=("The Wall" "The Abyss" "Minefield" "Menus" "Palette" "Void")
+
+# --- STRESS CONFIG GENERATOR ---
+generate_stress_config() {
+    if [[ -f "$CONFIG_FILE" ]]; then return 0; fi
+    
+    printf "Generating stress_test_extreme.conf... "
+    cat > "$CONFIG_FILE" << 'EOF'
+# -----------------------------------------------------------------------------
+# DUSKY EXTREME STRESS CONFIGURATION
+# -----------------------------------------------------------------------------
+
+# [TAB 0] THE WALL (Massive Block)
+# 250 Items will be injected here dynamically
+mass_block {
+    wall_item_1 = 1
+}
+
+# [TAB 1] THE ABYSS (Deep Nesting)
+# Testing Hyprland-style nesting depth
+level_0 {
+    # Depth 1
+    val_l1 = 10
+    
+    level_1 {
+        # Depth 2
+        val_l2 = 20
+        
+        level_2 {
+            # Depth 3
+            val_l3 = 30
+            
+            level_3 {
+                # Depth 4 (Standard Hyprland limit is usually around here)
+                val_l4 = 40
+                
+                level_4 {
+                    # Depth 5
+                    val_l5 = 50
+                    
+                    level_5 {
+                        # Depth 6 (Extreme)
+                        val_l6 = 60
+                        deep_bool = true
+                    }
+                }
+            }
+        }
+    }
+}
+
+# [TAB 2] MINEFIELD (Parser Traps)
+traps {
+    # TRAP 1: Comments with braces
+    # The parser uses brace counting. If this logic is weak,
+    # these comments will break the block depth calculation.
+    # { 
+    #   ignore_me = true
+    # }
+    # } } }
+
+    # TRAP 2: Octal confusion
+    # Bash treats 08 as invalid octal. Engine must handle this.
+    val_octal_07 = 07
+    val_octal_08 = 08
+    val_octal_09 = 09
+    
+    # TRAP 3: Floating point precision
+    val_float_std = 1.5
+    val_float_neg = -50.555
+    val_float_micro = 0.00001
+    val_float_huge = 999999.99
+    
+    # TRAP 4: Unset and Empty
+    val_empty = ""
+    # val_missing is not defined in file at all
+}
+
+# [TAB 4] PALETTE (Hex/Hash Edge Cases)
+colors {
+    # Standard Hex
+    col_std = 0xff112233
+    
+    # Hash without space (Should work)
+    col_hash_nospace=#aabbcc
+    
+    # Hash WITH space (Ambiguous in Bash/Awk)
+    # Parser logic: "sub(/[[:space:]]+#.*$/, "", val)"
+    # This implies space+hash is treated as a comment!
+    # So this value should be read as empty/unset by the engine.
+    col_hash_space = #ddeeff
+}
+EOF
+
+    # Inject 250 items for "The Wall"
+    local _mass_tmp
+    _mass_tmp=$(mktemp)
+    
+    awk '
+    /wall_item_1/ {
+        print "    wall_item_1 = 1"
+        for (i=2; i<=250; i++) {
+            printf "    wall_item_%d = %d\n", i, i
+        }
+        next
+    }
+    { print }
+    ' "$CONFIG_FILE" > "$_mass_tmp"
+    cat "$_mass_tmp" > "$CONFIG_FILE"
+    rm -f "$_mass_tmp"
+    echo "Done."
+}
 
 # Item Registration
 register_items() {
-    # Tab 0: General
-    register 0 "Enable Logs"    'logs_enabled|bool|general|||'          "true"
-    register 0 "Timeout (ms)"   'timeout|int|general|0|1000|50'        "100"
+    # Ensure config exists
+    generate_stress_config
+
+    # --- TAB 0: THE WALL (250 Items) ---
+    # Tests scrolling performance, array limits, and rendering speed.
+    local i
+    for (( i=1; i<=250; i++ )); do
+        register 0 "Wall Item #$i" "wall_item_$i|int|mass_block|0|9999|1" "$i"
+    done
     
-    # Tab 1: Input
-    register 1 "Sensitivity"    'sensitivity|float|input|-1.0|1.0|0.1' "0.0"
-    register 1 "Accel Profile"  'accel_profile|cycle|input|flat,adaptive,custom||' "adaptive"
+    # --- TAB 1: THE ABYSS (Deep Nesting) ---
+    # Tests parsing stack depth and variable retrieval from deep scopes.
+    # Note: The engine keys items by "key|immediate_parent_block".
+    register 1 "Level 1 (Depth 1)" 'val_l1|int|level_0|0|100|1' "10"
+    register 1 "Level 2 (Depth 2)" 'val_l2|int|level_1|0|100|1' "20"
+    register 1 "Level 3 (Depth 3)" 'val_l3|int|level_2|0|100|1' "30"
+    register 1 "Level 4 (Depth 4)" 'val_l4|int|level_3|0|100|1' "40"
+    register 1 "Level 5 (Depth 5)" 'val_l5|int|level_4|0|100|1' "50"
+    register 1 "Level 6 (Depth 6)" 'val_l6|int|level_5|0|100|1' "60"
+    register 1 "Deep Toggle"       'deep_bool|bool|level_5|||'  "false"
+
+    # --- TAB 2: MINEFIELD (Edge Cases) ---
+    register 2 "Octal 07 (Safe)"   'val_octal_07|int|traps|0|20|1' "7"
+    register 2 "Octal 08 (Trap)"   'val_octal_08|int|traps|0|20|1' "8"
+    register 2 "Octal 09 (Trap)"   'val_octal_09|int|traps|0|20|1' "9"
     
-    # Tab 2: Display
-    register 2 "Border Size"    'border_size|int||0|10|1'              "2"
-    register 2 "Blur Enabled"   'blur|bool|decoration|||'              "true"
+    register 2 "Float Negative"    'val_float_neg|float|traps|-100.0|0.0|0.5' "-50.0"
+    register 2 "Float Micro"       'val_float_micro|float|traps|0.0|1.0|0.00001' "0.00001"
+    register 2 "Float Huge"        'val_float_huge|float|traps|0.0|1000000.0|100.5' "0.0"
     
-    # Tab 3: Misc
-    # 'menu' type item. The 'key' (advanced_settings) is used as the Menu ID.
-    register 3 "Advanced Settings" 'advanced_settings|menu||||'        ""
+    # Empty string handling
+    register 2 "Explicit Empty"    'val_empty|cycle|traps|one,two,three||' "one"
+    # Key does not exist in file
+    register 2 "Missing Key"       'val_missing|bool|traps|||' "true"
+
+    # --- TAB 3: MENUS (Context Switching) ---
+    # Menu 1: Controls specific deep items
+    register 3 "Deep Controls >"   'menu_deep|menu||||' ""
+    register_child "menu_deep" "Deep Value L5" 'val_l5|int|level_4|0|100|5' "50"
+    register_child "menu_deep" "Deep Value L6" 'val_l6|int|level_5|0|100|5' "60"
     
-    # Submenu Items (registered to parent ID "advanced_settings")
-    register_child "advanced_settings" "Touchpad Enable"  'enabled|bool|touchpad|||' "true"
-    register_child "advanced_settings" "Scroll Factor"    'scroll_factor|float|touchpad|0.1|5.0|0.1' "1.0"
-    register_child "advanced_settings" "Tap to Click"     'tap-to-click|bool|touchpad|||' "true"
-    
-    register 3 "Shadow Color"   'col.shadow|cycle|general|0xee1a1a1a,0xff000000||' "0xee1a1a1a"
+    # Menu 2: Controls colors (Cross-referencing logic)
+    register 3 "Color Setup >"     'menu_colors|menu||||' ""
+    register_child "menu_colors" "Standard Hex" 'col_std|cycle|colors|0xff112233,0xffffffff||' "0xff112233"
+    register_child "menu_colors" "Hash NoSpace" 'col_hash_nospace|cycle|colors|#aabbcc,#ffffff||' "#aabbcc"
+
+    # Menu 3: Broken/Empty Menu
+    register 3 "Empty Menu >"      'menu_empty|menu||||' ""
+
+    # --- TAB 4: PALETTE (Hash parsing) ---
+    register 4 "Std Hex (0x)"      'col_std|cycle|colors|0xff112233,0xff000000||' "0xff112233"
+    register 4 "Hash NoSpace"      'col_hash_nospace|cycle|colors|#aabbcc,#112233||' "#aabbcc"
+    # This is expected to show as UNSET or default because " = #..." is stripped as comment
+    register 4 "Hash Space (Trap)" 'col_hash_space|cycle|colors|#ddeeff,#223344||' "#ddeeff"
+
+    # --- TAB 5: VOID ---
+    # Intentionally empty to test empty list rendering
 }
 
 # Post-Write Hook
 post_write_action() {
-    : # Reload command here
+    : # No-op for stress test
 }
 
 # =============================================================================
-# ▲ END OF USER CONFIGURATION ▲
+# ▲ END OF USER CONFIGURATION (CORE ENGINE BELOW) ▲
 # =============================================================================
 
 # --- Pre-computed Constants ---
@@ -1011,9 +1150,8 @@ handle_input_router() {
 main() {
     if (( BASH_VERSINFO[0] < 5 )); then log_err "Bash 5.0+ required"; exit 1; fi
     if [[ ! -t 0 ]]; then log_err "TTY required"; exit 1; fi
-    if [[ ! -f "$CONFIG_FILE" ]]; then log_err "Config not found: $CONFIG_FILE"; exit 1; fi
-    if [[ ! -w "$CONFIG_FILE" ]]; then log_err "Config not writable: $CONFIG_FILE"; exit 1; fi
-
+    # Config generation happens inside register_items now to ensure it exists before cache population
+    
     local _dep
     # Removed sed from dependencies as it's no longer used
     for _dep in awk; do
@@ -1023,6 +1161,11 @@ main() {
     done
 
     register_items
+    
+    # Safety check after generation
+    if [[ ! -f "$CONFIG_FILE" ]]; then log_err "Config not found: $CONFIG_FILE"; exit 1; fi
+    if [[ ! -w "$CONFIG_FILE" ]]; then log_err "Config not writable: $CONFIG_FILE"; exit 1; fi
+
     populate_config_cache
 
     ORIGINAL_STTY=$(stty -g 2>/dev/null) || ORIGINAL_STTY=""
