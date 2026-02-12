@@ -1,148 +1,235 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# ARCH LINUX / UWSM CLIPBOARD MANAGER
-# Role: Elite DevOps Engineer
-# Description: Toggles cliphist persistence in .config/uwsm/env
-# Environment: Bash 5+, Hyprland, UWSM
-# ==============================================================================
+# -----------------------------------------------------------------------------
+# UWSM Clipboard Persistence Manager - v1.1.0 (Hardened)
+# -----------------------------------------------------------------------------
+# Target: Arch Linux / Hyprland / UWSM / Wayland
+#
+# Description: Toggles cliphist persistence in ~/.config/uwsm/env
+#              by commenting/uncommenting the CLIPHIST_DB_PATH export.
+#
+# v1.1.0 CHANGELOG:
+#   - CRITICAL: Replaced sed -i with atomic awk + cat to preserve symlinks.
+#   - FIX: Proper cleanup trap function instead of inline trap.
+#   - FIX: Consistent ANSI constant declarations (declare -r).
+#   - FIX: Added Bash version check (5.0+ required).
+#   - FIX: Added TTY check for interactive read.
+#   - FIX: Added dependency checks (awk, grep).
+#   - FIX: Added file writability check.
+#   - FIX: Secure temp file creation and cleanup.
+#   - STYLE: Aligned with Dusky TUI Engine master template v3.9.1.
+# -----------------------------------------------------------------------------
 
-# ------------------------------------------------------------------------------
-# 1. STRICT MODE & ERROR HANDLING
-# ------------------------------------------------------------------------------
 set -euo pipefail
-IFS=$'\n\t'
 
-# Trap for cleanup (even though we keep it clean, good habit)
-trap 'exit_code=$?; [[ $exit_code -ne 0 ]] && log_err "Script exited with error code $exit_code"; exit $exit_code' EXIT
+# =============================================================================
+# ANSI Constants
+# =============================================================================
+declare -r C_RESET=$'\033[0m'
+declare -r C_RED=$'\033[0;31m'
+declare -r C_GREEN=$'\033[0;32m'
+declare -r C_BLUE=$'\033[0;34m'
+declare -r C_YELLOW=$'\033[1;33m'
+declare -r C_BOLD=$'\033[1m'
 
-# ------------------------------------------------------------------------------
-# 2. STYLING & LOGGING
-# ------------------------------------------------------------------------------
-# UPDATED: Added $ for correct ANSI-C quoting
-readonly RED=$'\033[0;31m'
-readonly GREEN=$'\033[0;32m'
-readonly BLUE=$'\033[0;34m'
-readonly YELLOW=$'\033[1;33m'
-readonly BOLD=$'\033[1m'
-readonly NC=$'\033[0m' # No Color
+# =============================================================================
+# Configuration
+# =============================================================================
+declare -r CONFIG_DIR="${HOME}/.config/uwsm"
+declare -r CONFIG_FILE="${CONFIG_DIR}/env"
+declare -r TARGET_LINE='export CLIPHIST_DB_PATH="${XDG_RUNTIME_DIR}/cliphist.db"'
 
-log_info() { printf "${BLUE}[INFO]${NC} %s\n" "$1"; }
-log_success() { printf "${GREEN}[SUCCESS]${NC} %s\n" "$1"; }
-log_warn() { printf "${YELLOW}[WARN]${NC} %s\n" "$1"; }
-log_err() { printf "${RED}[ERROR]${NC} %s\n" "$1" >&2; }
+# =============================================================================
+# Temp File Global (for cleanup safety)
+# =============================================================================
+declare _TMPFILE=""
 
-# ------------------------------------------------------------------------------
-# 3. PRIVILEGE CHECK
-# ------------------------------------------------------------------------------
-# ARCHITECT NOTE: We are editing ~/.config.
-# Running as root is dangerous for file permissions. We enforce USER mode.
-if [[ $EUID -eq 0 ]]; then
-  log_err "Do NOT run this script as root/sudo."
-  log_err "This script modifies your personal user configuration (~/.config)."
-  log_err "Please run again as your normal user."
-  exit 1
-fi
+# =============================================================================
+# Logging
+# =============================================================================
+log_info()    { printf '%s[INFO]%s %s\n'    "$C_BLUE"   "$C_RESET" "$1"; }
+log_success() { printf '%s[SUCCESS]%s %s\n' "$C_GREEN"  "$C_RESET" "$1"; }
+log_warn()    { printf '%s[WARN]%s %s\n'    "$C_YELLOW" "$C_RESET" "$1"; }
+log_err()     { printf '%s[ERROR]%s %s\n'   "$C_RED"    "$C_RESET" "$1" >&2; }
 
-# ------------------------------------------------------------------------------
-# 4. CONFIGURATION
-# ------------------------------------------------------------------------------
-readonly CONFIG_DIR="${HOME}/.config/uwsm"
-readonly CONFIG_FILE="${CONFIG_DIR}/env"
-# The specific line we are targeting
-readonly TARGET_LINE='export CLIPHIST_DB_PATH="${XDG_RUNTIME_DIR}/cliphist.db"'
-
-# ------------------------------------------------------------------------------
-# 5. PRE-FLIGHT CHECKS
-# ------------------------------------------------------------------------------
-if [[ ! -f "$CONFIG_FILE" ]]; then
-  log_err "Configuration file not found at: ${CONFIG_FILE}"
-  log_info "Please ensure UWSM is initialized and the path is correct."
-  exit 1
-fi
-
-# ------------------------------------------------------------------------------
-# 6. LOGIC CORE
-# ------------------------------------------------------------------------------
-
-update_config() {
-  local mode="$1"
-
-  # We use | as sed delimiter to avoid clashing with file paths in the string
-  if [[ "$mode" == "ephemeral" ]]; then
-    # Check if already uncommented (active)
-    if grep -q "^${TARGET_LINE}" "$CONFIG_FILE"; then
-      log_info "Config is already set to Ephemeral."
-      return
+# =============================================================================
+# Cleanup & Traps
+# =============================================================================
+cleanup() {
+    # Secure temp file cleanup
+    if [[ -n "${_TMPFILE:-}" && -f "$_TMPFILE" ]]; then
+        rm -f "$_TMPFILE" 2>/dev/null || :
     fi
-
-    # Uncomment the line: Search for commented version, replace with active version
-    # We allow for flexible whitespace after the #
-    sed -i "s|^\s*#\s*export CLIPHIST_DB_PATH=.*|${TARGET_LINE}|" "$CONFIG_FILE"
-    log_success "Set to Ephemeral. (Line uncommented)."
-
-  elif [[ "$mode" == "persistent" ]]; then
-    # Check if already commented (inactive)
-    if grep -q "^\s*#\s*export CLIPHIST_DB_PATH" "$CONFIG_FILE"; then
-      log_info "Config is already set to Persistent."
-      return
-    fi
-
-    # Comment out the line
-    sed -i "s|^export CLIPHIST_DB_PATH=.*|# ${TARGET_LINE}|" "$CONFIG_FILE"
-    log_success "Set to Persistent. (Line commented out)."
-  fi
 }
 
-# ------------------------------------------------------------------------------
-# 7. USER INTERFACE
-# ------------------------------------------------------------------------------
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# =============================================================================
+# Pre-flight Checks
+# =============================================================================
+
+# Bash version gate
+if (( BASH_VERSINFO[0] < 5 )); then
+    log_err "Bash 5.0+ required."
+    exit 1
+fi
+
+# TTY check (we need interactive input)
+if [[ ! -t 0 ]]; then
+    log_err "Interactive TTY required."
+    exit 1
+fi
+
+# Root guard — editing ~/.config as root breaks file ownership
+if [[ $EUID -eq 0 ]]; then
+    log_err "Do NOT run this script as root/sudo."
+    log_err "This script modifies your personal user configuration (~/.config)."
+    log_err "Please run again as your normal user."
+    exit 1
+fi
+
+# Dependency checks
+declare _dep
+for _dep in awk grep; do
+    if ! command -v "$_dep" &>/dev/null; then
+        log_err "Missing dependency: ${_dep}"
+        exit 1
+    fi
+done
+unset _dep
+
+# Config file existence and writability
+if [[ ! -f "$CONFIG_FILE" ]]; then
+    log_err "Configuration file not found at: ${CONFIG_FILE}"
+    log_info "Please ensure UWSM is initialized and the path is correct."
+    exit 1
+fi
+
+if [[ ! -w "$CONFIG_FILE" ]]; then
+    log_err "Configuration file not writable: ${CONFIG_FILE}"
+    exit 1
+fi
+
+# =============================================================================
+# Core Logic — Atomic File Write (Symlink-Safe)
+# =============================================================================
+# CRITICAL: Uses awk + cat > target instead of sed -i.
+# sed -i replaces the inode (breaks symlinks). cat > preserves them.
+
+update_config() {
+    local mode="$1"
+
+    if [[ "$mode" == "ephemeral" ]]; then
+        # Check if already uncommented (active)
+        if grep -q "^${TARGET_LINE}" "$CONFIG_FILE"; then
+            log_info "Config is already set to Ephemeral."
+            return 0
+        fi
+
+        # Verify the commented version exists before attempting modification
+        if ! grep -q '^\s*#\s*export CLIPHIST_DB_PATH=' "$CONFIG_FILE"; then
+            log_err "Could not find CLIPHIST_DB_PATH line (commented or uncommented) in config."
+            return 1
+        fi
+
+        _TMPFILE=$(mktemp "${CONFIG_FILE}.tmp.XXXXXXXXXX")
+
+        LC_ALL=C awk -v target="$TARGET_LINE" '
+        /^[[:space:]]*#[[:space:]]*export[[:space:]]+CLIPHIST_DB_PATH=/ {
+            print target
+            next
+        }
+        { print }
+        ' "$CONFIG_FILE" > "$_TMPFILE"
+
+        # Preserve symlinks: write content back, do NOT mv
+        cat "$_TMPFILE" > "$CONFIG_FILE"
+        rm -f "$_TMPFILE"
+        _TMPFILE=""
+
+        log_success "Set to Ephemeral. (Line uncommented)."
+
+    elif [[ "$mode" == "persistent" ]]; then
+        # Check if already commented (inactive)
+        if grep -q '^\s*#\s*export CLIPHIST_DB_PATH=' "$CONFIG_FILE"; then
+            log_info "Config is already set to Persistent."
+            return 0
+        fi
+
+        # Verify the uncommented version exists before attempting modification
+        if ! grep -q '^export CLIPHIST_DB_PATH=' "$CONFIG_FILE"; then
+            log_err "Could not find an active CLIPHIST_DB_PATH line in config."
+            return 1
+        fi
+
+        _TMPFILE=$(mktemp "${CONFIG_FILE}.tmp.XXXXXXXXXX")
+
+        LC_ALL=C awk -v target="$TARGET_LINE" '
+        /^export[[:space:]]+CLIPHIST_DB_PATH=/ {
+            print "# " target
+            next
+        }
+        { print }
+        ' "$CONFIG_FILE" > "$_TMPFILE"
+
+        # Preserve symlinks: write content back, do NOT mv
+        cat "$_TMPFILE" > "$CONFIG_FILE"
+        rm -f "$_TMPFILE"
+        _TMPFILE=""
+
+        log_success "Set to Persistent. (Line commented out)."
+    fi
+
+    return 0
+}
+
+# =============================================================================
+# User Interface
+# =============================================================================
 clear
-printf "${BOLD}UWSM Clipboard Persistence Manager${NC}\n"
-printf "Target: ${CONFIG_FILE}\n\n"
+printf '%sUWSM Clipboard Persistence Manager%s\n' "$C_BOLD" "$C_RESET"
+printf 'Target: %s\n\n' "$CONFIG_FILE"
 
-printf "${BOLD}Which mode do you prefer?${NC}\n\n"
+printf '%sWhich mode do you prefer?%s\n\n' "$C_BOLD" "$C_RESET"
 
-printf "  ${BOLD}1) Ephemeral (RAM-based)${NC}\n"
-printf "     - Clipboard history is stored in RAM.\n"
-printf "     - It ${RED}disappears${NC} when you reboot or shutdown.\n"
-printf "     - Good for privacy and saving disk writes.\n\n"
+printf '  %s1) Ephemeral (RAM-based)%s\n' "$C_BOLD" "$C_RESET"
+printf '     - Clipboard history is stored in RAM.\n'
+printf '     - It %sdisappears%s when you reboot or shutdown.\n' "$C_RED" "$C_RESET"
+printf '     - Good for privacy and saving disk writes.\n\n'
 
-printf "  ${BOLD}2) Persistent (Disk-based)${NC}\n"
-printf "     - Clipboard history is stored on your hard drive.\n"
-printf "     - Your history ${GREEN}stays available${NC} even after you reboot.\n"
-printf "     - Standard behavior for most users.\n\n"
+printf '  %s2) Persistent (Disk-based)%s\n' "$C_BOLD" "$C_RESET"
+printf '     - Clipboard history is stored on your hard drive.\n'
+printf '     - Your history %sstays available%s even after you reboot.\n' "$C_GREEN" "$C_RESET"
+printf '     - Standard behavior for most users.\n\n'
 
-# UPDATED: Prompt now indicates default and handles empty input
 read -rp "Select option [1/2] (default: 1): " choice
 choice="${choice:-1}"
 
 case "$choice" in
-1)
-  log_info "Applying Ephemeral settings..."
-  update_config "ephemeral"
-  ;;
-2)
-  log_info "Applying Persistent settings..."
-  update_config "persistent"
-  ;;
-*)
-  log_err "Invalid selection. Exiting."
-  exit 1
-  ;;
+    1)
+        log_info "Applying Ephemeral settings..."
+        update_config "ephemeral"
+        ;;
+    2)
+        log_info "Applying Persistent settings..."
+        update_config "persistent"
+        ;;
+    *)
+        log_err "Invalid selection. Exiting."
+        exit 1
+        ;;
 esac
 
-# ------------------------------------------------------------------------------
-# 8. POST-PROCESS
-# ------------------------------------------------------------------------------
-# Check for UWSM presence to suggest reload
+# =============================================================================
+# Post-Process
+# =============================================================================
 if command -v uwsm >/dev/null 2>&1; then
-  printf "\n"
-  log_info "Changes saved."
-  log_info "To apply changes immediately, log out and back in, or restart at a later time."
+    printf '\n'
+    log_info "Changes saved."
+    log_info "To apply changes immediately, log out and back in, or restart at a later time."
 else
-  log_warn "uwsm command not found in PATH. Ensure you are in a UWSM session."
+    log_warn "uwsm command not found in PATH. Ensure you are in a UWSM session."
 fi
 
-# Reset trap before clean exit
-trap - EXIT
 exit 0
