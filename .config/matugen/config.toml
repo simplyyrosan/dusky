@@ -94,8 +94,13 @@ input_path = '~/.config/matugen/templates/opencode-colors.json'
 output_path = '~/.config/opencode/generated/opencode.json'
 
 [templates.vscode]
-input_path = '~/.config/matugen/templates/vscode.json'
-output_path = '~/.config/VSCodium/User/settings.json'
+input_path  = '~/.config/matugen/templates/vscode.json'
+output_path = '~/.config/matugen/generated/vscode.json'
+post_hook   = '''
+if command -v vscodium &> /dev/null; then
+    ln -nfs $HOME/.config/matugen/generated/vscode.json $HOME/.config/VSCodium/User/settings.json
+fi
+'''
 
 # [templates.alacritty]
 # input_path  = '~/.config/matugen/templates/alacritty.toml'
