@@ -110,7 +110,7 @@ main() {
    ╚═══════════════════════════════════════╝
 BANNER
     printf '%b\n' "${C_RESET}"
-    printf "%b[Action Required]%b: Open Firefox -> Extensions -> Pywalfox -> 'Fetch Pywal Colors'\n" "${C_WARN}" "${C_RESET}"
+    printf "%b[Action Required]%b: Open Firefox -> Install Extensions -> Pywalfox -> 'Fetch Pywal Colors'\n" "${C_WARN}" "${C_RESET}"
     printf "Press %b[ENTER]%b to launch Firefox..." "${C_GREEN}" "${C_RESET}"
     read -r || true
 
