@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ==============================================================================
-# DUSKY KOKORO INSTALLER V32 (Universal: NVIDIA / AMD / CPU)
+# DUSKY KOKORO INSTALLER V35 (AMD Fix + Final Polish)
 # ==============================================================================
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,19 +14,20 @@ readonly TARGET_TRIGGER="$TRIGGER_DIR/trigger.sh"
 readonly MODEL_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
 readonly VOICES_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
 
-echo ":: [V32] Initializing Dusky Kokoro Universal Setup..."
+echo ":: [V35] Initializing Dusky Kokoro Setup..."
 
-# --- 1. Hardware Detection Report (Informational Only) ---
+# --- 1. Hardware Detection Report ---
 echo "--------------------------------------------------------"
 echo ":: Hardware Scan:"
 GPU_FOUND=false
 
 if command -v lspci &>/dev/null; then
-    if lspci | grep -i "nvidia" &>/dev/null; then
+    # Use text grep for classes "VGA", "3D", or "Display" to match reliable GPU markers
+    if lspci | grep -E "VGA|3D|Display" | grep -i "nvidia" &>/dev/null; then
         echo "   [✓] NVIDIA GPU Detected"
         GPU_FOUND=true
     fi
-    if lspci | grep -i "amd" &>/dev/null || lspci | grep -i "radeon" &>/dev/null; then
+    if lspci | grep -E "VGA|3D|Display" | grep -iE "amd|radeon" &>/dev/null; then
         echo "   [✓] AMD GPU Detected"
         GPU_FOUND=true
     fi
@@ -39,13 +40,16 @@ if [ "$GPU_FOUND" = false ]; then
 fi
 echo "--------------------------------------------------------"
 
-# --- 2. User Selection (Explicit Intent) ---
+# --- 2. User Selection ---
 echo "Select your installation target:"
 echo "  1) NVIDIA (CUDA) - Best for GeForce/RTX cards"
 echo "  2) AMD (ROCm)    - Best for Radeon/Instinct cards (Linux only)"
 echo "  3) CPU Only      - Works everywhere, no GPU required (Lightweight)"
 echo ""
-read -p "Enter choice [1-3]: " HW_CHOICE
+
+# Fix: Initialize variable to prevent 'unbound variable' error on Ctrl+D
+HW_CHOICE=""
+read -p "Enter choice [1-3]: " HW_CHOICE || true
 
 MODE="cpu"
 if [[ "$HW_CHOICE" == "1" ]]; then
@@ -90,7 +94,7 @@ uv add "soundfile" "numpy"
 
 case "$MODE" in
     nvidia)
-        # Note: kokoro-onnx[gpu] pulls onnxruntime-gpu
+        # NVIDIA: kokoro-onnx[gpu] uses the [gpu] extra to pull onnxruntime-gpu correctly
         uv add "kokoro-onnx[gpu]" \
                "nvidia-cuda-runtime-cu12" \
                "nvidia-cublas-cu12" \
@@ -98,12 +102,17 @@ case "$MODE" in
                "nvidia-cufft-cu12"
         ;;
     amd)
-        # Note: Install base kokoro-onnx (no [gpu] extra) to avoid pulling onnxruntime-gpu
-        # Then explicitly add onnxruntime-rocm
-        uv add "kokoro-onnx" "onnxruntime-rocm"
+        # AMD: 
+        # 1. Install kokoro-onnx (which pulls the standard CPU onnxruntime by default)
+        uv add "kokoro-onnx"
+        # 2. Force-install onnxruntime-rocm. 
+        # We use 'uv pip install' to bypass the strict resolver and overwrite the CPU files.
+        # This ensures the 'onnxruntime' import actually points to the ROCm-enabled binaries.
+        echo ":: Forcing ROCm runtime installation..."
+        uv pip install onnxruntime-rocm --force-reinstall --no-deps
         ;;
     cpu)
-        # Standard CPU runtime
+        # CPU: Standard runtime
         uv add "kokoro-onnx" "onnxruntime"
         ;;
 esac
@@ -118,13 +127,13 @@ if [[ ! -f "$MODEL_DIR/voices.bin" ]]; then
     curl -L "$VOICES_URL" -o "$MODEL_DIR/voices.bin"
 fi
 
-# --- 6. Generate Trigger (Mode-Aware) ---
+# --- 6. Generate Trigger ---
 echo ":: Generating Trigger Script..."
 
-# We inject the MODE variable into the generated script so it knows if it needs library hacks
 cat << EOF > "$TARGET_TRIGGER"
 #!/usr/bin/env bash
-# Dusky Kokoro Trigger V32 ($MODE edition)
+# Dusky Kokoro Trigger V35 ($MODE edition)
+# Features: Universal HW, Robust Detection, Cold Boot Fix, Hard Kill
 
 readonly APP_DIR="$HOME/contained_apps/uv/dusky_kokoro"
 readonly PID_FILE="/tmp/dusky_kokoro.pid"
@@ -137,7 +146,7 @@ readonly INSTALL_MODE="$MODE"
 # --- Helpers ---
 
 get_libs() {
-    # NVIDIA-specific library discovery for UV pip packages
+    # NVIDIA-specific library discovery
     if [[ "\$INSTALL_MODE" == "nvidia" ]]; then
         local SITE_PACKAGES
         SITE_PACKAGES=\$(find "\$APP_DIR/.venv" -type d -name "site-packages" 2>/dev/null | head -n 1)
@@ -166,6 +175,7 @@ stop_daemon() {
                 sleep 0.1
             done
             if kill -0 "\$pid" 2>/dev/null; then
+                echo ":: Daemon stuck. Force killing..."
                 kill -9 "\$pid" 2>/dev/null || true
             fi
         fi
@@ -181,7 +191,6 @@ start_daemon() {
         return 1
     fi
 
-    # Only set LD_LIBRARY_PATH if we are in NVIDIA mode
     local EXTRA_LIBS
     EXTRA_LIBS=\$(get_libs)
     if [[ -n "\$EXTRA_LIBS" ]]; then
@@ -199,6 +208,7 @@ start_daemon() {
         nohup uv run dusky_main.py --daemon > "\$DAEMON_LOG" 2>&1 &
     fi
 
+    # IMMEDIATE PID LOCK: Prevents double-start during cold boot
     local daemon_pid=\$!
     echo "\$daemon_pid" > "\$PID_FILE"
 
@@ -212,72 +222,129 @@ start_daemon() {
             return 0
         fi
         if ! kill -0 "\$daemon_pid" 2>/dev/null; then
-            echo ":: ERROR: Daemon crashed on startup."
-            notify "Kokoro Failed" "Daemon crashed."
+            echo ":: ERROR: Daemon process died during startup."
+            notify "Kokoro Failed" "Daemon crashed during startup."
             return 1
         fi
         sleep 0.1
     done
 
     echo ":: ERROR: Daemon start timeout (30s)."
-    notify "Kokoro Failed" "Timeout."
+    notify "Kokoro Failed" "Daemon start timeout."
     return 1
+}
+
+show_help() {
+    cat << 'HELP'
+Dusky Kokoro TTS — Trigger Script
+
+USAGE:
+    trigger.sh              Send clipboard text to TTS (starts daemon if needed)
+    trigger.sh [OPTION]
+
+OPTIONS:
+    --help, -h       Show this help
+    --kill           Stop the daemon
+    --restart        Restart the daemon
+    --status         Check if daemon is running
+    --debug          Restart in debug mode (tails verbose log)
+    --logs           Tail the daemon log
+HELP
 }
 
 # --- CLI Logic ---
 case "\${1:-}" in
     --help|-h)
-        echo "Usage: trigger.sh [--kill|--restart|--status|--debug|--logs]"
+        show_help
         exit 0
         ;;
     --kill)
-        stop_daemon
-        echo ":: Stopped."
+        if is_running; then
+            stop_daemon
+            echo ":: Daemon stopped."
+        else
+            echo ":: Daemon not running (cleaning stale files)."
+            rm -f "\$PID_FILE" "\$FIFO_PATH" "\$READY_FILE"
+        fi
         exit 0
         ;;
     --status)
-        if is_running; then echo ":: Running (PID: \$(cat "\$PID_FILE"))"; else echo ":: Stopped"; fi
+        if is_running; then 
+            echo ":: Daemon running (PID: \$(cat "\$PID_FILE"))"
+        else 
+            echo ":: Daemon not running."
+        fi
         exit 0
         ;;
     --restart)
+        echo ":: Restarting daemon..."
         stop_daemon
         start_daemon "false"
-        exit 0
+        exit \$?
         ;;
     --logs)
-        [[ -f "\$DAEMON_LOG" ]] && tail -f "\$DAEMON_LOG"
+        if [[ -f "\$DAEMON_LOG" ]]; then
+            tail -f "\$DAEMON_LOG"
+        else
+            echo ":: No log file at \$DAEMON_LOG"
+        fi
         exit 0
         ;;
     --debug)
-        stop_daemon
+        if is_running; then
+            echo ":: Stopping existing daemon..."
+            stop_daemon
+        fi
         start_daemon "true"
         exit \$?
+        ;;
+    --*)
+        echo ":: Unknown flag: \$1"
+        echo ":: Use '\$(basename "\$0") --help' for usage."
+        exit 1
+        ;;
+    "")
+        ;;
+    *)
+        echo ":: Unknown argument: \$1"
+        exit 1
         ;;
 esac
 
 # --- Trigger Logic ---
+
+# Ensure running
 if ! is_running; then
     rm -f "\$FIFO_PATH" "\$PID_FILE" "\$READY_FILE"
     if ! start_daemon "false"; then exit 1; fi
 fi
 
-# Secondary readiness check
+# Secondary readiness gate
 if [[ ! -f "\$READY_FILE" ]]; then
     for _ in {1..300}; do
-        [[ -f "\$READY_FILE" ]] && break
-        ! is_running && exit 1
+        if [[ -f "\$READY_FILE" ]]; then break; fi
+        if ! is_running; then
+            echo ":: ERROR: Daemon died while waiting for readiness."
+            notify "Kokoro Failed" "Daemon died during startup."
+            exit 1
+        fi
         sleep 0.1
     done
-    [[ ! -f "\$READY_FILE" ]] && exit 1
+    if [[ ! -f "\$READY_FILE" ]]; then
+        echo ":: ERROR: Daemon readiness timeout (30s)."
+        notify "Kokoro Failed" "Daemon not ready."
+        exit 1
+    fi
 fi
 
+# Send Clipboard
 INPUT_TEXT=\$(timeout 2 wl-paste 2>/dev/null || true)
 if [[ -n "\$INPUT_TEXT" ]]; then
     CLEAN_TEXT=\$(printf '%s' "\$INPUT_TEXT" | tr '\n' ' ')
+
     printf '%s\n' "\$CLEAN_TEXT" > "\$FIFO_PATH" &
     WRITE_PID=\$!
     
-    # Wait for write (non-blocking validation)
     WRITE_OK=false
     for _ in {1..20}; do
         if ! kill -0 "\$WRITE_PID" 2>/dev/null; then
@@ -291,6 +358,7 @@ if [[ -n "\$INPUT_TEXT" ]]; then
         notify -t 1000 "Kokoro" "Processing..."
     else
         kill "\$WRITE_PID" 2>/dev/null || true
+        wait "\$WRITE_PID" 2>/dev/null || true
         notify "Kokoro Error" "Daemon Unresponsive"
     fi
 else

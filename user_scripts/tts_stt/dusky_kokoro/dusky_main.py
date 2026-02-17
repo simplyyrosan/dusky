@@ -21,7 +21,7 @@ import logging
 # ==============================================================================
 # VERSION & CONFIGURATION
 # ==============================================================================
-VERSION = "4.2 (Universal Hardware + Stable Boot)"
+VERSION = "4.3 (Universal HW + Regression Fixes)"
 
 ZRAM_MOUNT = Path("/mnt/zram1")
 AUDIO_OUTPUT_DIR = ZRAM_MOUNT / "kokoro_audio"
@@ -136,7 +136,7 @@ def get_next_index(directory):
 
 
 # ==============================================================================
-# HARDWARE ENFORCER (UNIVERSAL)
+# HARDWARE ENFORCER (UNIVERSAL - FIXED ROCM)
 # ==============================================================================
 import onnxruntime as rt
 
@@ -149,18 +149,15 @@ class PatchedInferenceSession(rt.InferenceSession):
         if sess_options is None:
             sess_options = rt.SessionOptions()
         
-        # General optimizations
-        sess_options.enable_mem_pattern = False
-        sess_options.enable_cpu_mem_arena = False
-        sess_options.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_ALL
-        
-        # Dynamic Provider Selection based on what is actually installed
+        # 1. Determine Dynamic Providers FIRST
         dynamic_providers = []
         available_set = set(rt.get_available_providers())
+        is_gpu = False
 
-        # 1. Check for NVIDIA CUDA
+        # Check for NVIDIA CUDA
         if 'CUDAExecutionProvider' in available_set:
             logger.info("Configuring for NVIDIA CUDA...")
+            is_gpu = True
             cuda_options = {
                 'device_id': 0,
                 'arena_extend_strategy': 'kSameAsRequested',
@@ -170,20 +167,34 @@ class PatchedInferenceSession(rt.InferenceSession):
             }
             dynamic_providers.append(('CUDAExecutionProvider', cuda_options))
 
-        # 2. Check for AMD ROCm
-        if 'ROCmExecutionProvider' in available_set:
+        # Check for AMD ROCm
+        # BUG FIX: Removed 'cudnn_conv_algo_search' (CUDA only)
+        # BUG FIX: Added 'gpu_mem_limit'
+        elif 'ROCmExecutionProvider' in available_set:
             logger.info("Configuring for AMD ROCm...")
-            # ROCm options usually mirror CUDA, but safe defaults are best
+            is_gpu = True
             rocm_options = {
                 'device_id': 0,
                 'arena_extend_strategy': 'kSameAsRequested',
-                'cudnn_conv_algo_search': 'HEURISTIC',
+                'gpu_mem_limit': 3 * 1024 * 1024 * 1024, # 3GB VRAM limit
                 'do_copy_in_default_stream': True,
             }
             dynamic_providers.append(('ROCmExecutionProvider', rocm_options))
 
-        # 3. Always add CPU as fallback
+        # Always add CPU as fallback
         dynamic_providers.append('CPUExecutionProvider')
+
+        # 2. Configure Memory Options (Optimization)
+        # BUG FIX: Only disable memory arena if GPU is active
+        if is_gpu:
+            sess_options.enable_mem_pattern = False
+            sess_options.enable_cpu_mem_arena = False
+        else:
+            logger.info("CPU Mode: Enabling memory arena for performance.")
+            sess_options.enable_mem_pattern = True
+            sess_options.enable_cpu_mem_arena = True
+
+        sess_options.graph_optimization_level = rt.GraphOptimizationLevel.ORT_ENABLE_ALL
 
         logger.info(f"Active Provider Stack: {dynamic_providers}")
 
