@@ -178,10 +178,10 @@ scan_windows() {
         rule_block+="    ${C_COMMENT}# pin = on${C_RESET}"$'\n'
 
         rule_block+="    size = ${w_w} ${w_h}"$'\n'
-        rule_block+="    ${C_COMMENT}# size = (monitor_w * ${r_w}) (monitor_h * ${r_h})${C_RESET}"$'\n'
+        rule_block+="    ${C_COMMENT}# size = (monitor_w*${r_w}) (monitor_h*${r_h})${C_RESET}"$'\n'
 
         rule_block+="    move = ${local_x} ${local_y}"$'\n'
-        rule_block+="    ${C_COMMENT}# move = (monitor_w * ${r_x}) (monitor_h * ${r_y})${C_RESET}"$'\n'
+        rule_block+="    ${C_COMMENT}# move = (monitor_w*${r_x}) (monitor_h*${r_y})${C_RESET}"$'\n'
         rule_block+="    ${C_COMMENT}# move = (monitor_w-window_w-20) (monitor_h-window_h-20)${C_RESET}"$'\n'
         rule_block+="    ${C_COMMENT}# center = on${C_RESET}"$'\n'
 
