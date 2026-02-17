@@ -17,8 +17,8 @@ shopt -s extglob
 declare -r HOSTS_FILE="/etc/hosts"
 declare -r BACKUP_FILE="/etc/hosts.backup.focusforge"
 declare -r REDIRECT_IP="0.0.0.0"
-declare -r APP_TITLE="FocusForge"
-declare -r APP_VERSION="v2.1.0 (Elite)"
+declare -r APP_TITLE="Dusky Site Blocker"
+declare -r APP_VERSION="v2.1.0 (Stable)"
 
 # Dimensions & Layout
 declare -ri MAX_DISPLAY_ROWS=14
