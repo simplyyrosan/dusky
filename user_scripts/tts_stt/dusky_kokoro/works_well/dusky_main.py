@@ -21,7 +21,7 @@ import logging
 # ==============================================================================
 # VERSION & CONFIGURATION
 # ==============================================================================
-VERSION = "4.0 (StreamID + DoubleDrain)"
+VERSION = "4.1 (Stable Boot + FIFO Fix)"
 
 ZRAM_MOUNT = Path("/mnt/zram1")
 AUDIO_OUTPUT_DIR = ZRAM_MOUNT / "kokoro_audio"
@@ -432,11 +432,18 @@ class FifoReader(threading.Thread):
         self.daemon = True
         self.last_hash = None
         self.last_time = 0
+        self.fd = None # New: accept pre-opened FD
 
     def run(self):
-        if not self.fifo_path.exists():
-            os.mkfifo(self.fifo_path)
-        fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
+        # STABILITY FIX: Use the FD created by Main Thread if available
+        if self.fd is not None:
+            fd = self.fd
+        else:
+            # Fallback (old method)
+            if not self.fifo_path.exists():
+                os.mkfifo(self.fifo_path)
+            fd = os.open(self.fifo_path, os.O_RDWR | os.O_NONBLOCK)
+
         poll = select.poll()
         poll.register(fd, select.POLLIN)
 
@@ -513,6 +520,21 @@ class DuskyDaemon:
 
     def _should_stop(self):
         return not self.running or self.stop_event.is_set()
+
+    def _setup_fifo(self):
+        """Create and open the FIFO before signaling readiness. Prevents shell race condition."""
+        if FIFO_PATH.exists():
+            if not FIFO_PATH.is_fifo():
+                logger.warning(f"Non-FIFO file at {FIFO_PATH}, removing.")
+                FIFO_PATH.unlink()
+
+        if not FIFO_PATH.exists():
+            os.mkfifo(FIFO_PATH)
+
+        # Open in non-blocking R/W mode
+        fd = os.open(FIFO_PATH, os.O_RDWR | os.O_NONBLOCK)
+        self.fifo_reader.fd = fd
+        logger.debug("FIFO created and opened.")
 
     def generate(self, text):
         # NOTE: stop_event is cleared in start(), NOT here.
@@ -598,9 +620,17 @@ class DuskyDaemon:
         signal.signal(signal.SIGTERM, lambda s, f: self.stop())
         signal.signal(signal.SIGINT, lambda s, f: self.stop())
 
+        # WRITE PID
         PID_FILE.write_text(str(os.getpid()))
+        
+        # CREATE FIFO *BEFORE* READY
+        self._setup_fifo()
+        
+        # START THREADS
         self.playback.start()
         self.fifo_reader.start()
+        
+        # SIGNAL READY
         READY_FILE.touch()
 
         logger.info(f"Daemon Ready (PID: {os.getpid()})")

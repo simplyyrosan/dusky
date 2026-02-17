@@ -2,9 +2,10 @@
 set -euo pipefail
 
 # ==============================================================================
-# DUSKY KOKORO INSTALLER V30 (StreamID Support + Smart Trigger)
+# DUSKY KOKORO INSTALLER V31 (Stability Fixes + Cold Boot Optimization)
 # ==============================================================================
 
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly ENV_DIR="$HOME/contained_apps/uv/dusky_kokoro"
 readonly MODEL_DIR="$ENV_DIR/models"
 readonly TRIGGER_DIR="$HOME/user_scripts/tts_stt/dusky_kokoro"
@@ -13,7 +14,7 @@ readonly TARGET_TRIGGER="$TRIGGER_DIR/trigger.sh"
 readonly MODEL_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/kokoro-v0_19.onnx"
 readonly VOICES_URL="https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files/voices.bin"
 
-echo ":: [V30] Initializing Dusky Kokoro Setup..."
+echo ":: [V31] Initializing Dusky Kokoro Setup..."
 
 mkdir -p "$ENV_DIR" "$MODEL_DIR" "$TRIGGER_DIR"
 
@@ -24,8 +25,8 @@ if ! command -v uv &> /dev/null; then
 fi
 
 # Ensure the Python script is present before proceeding
-if [[ -f "dusky_main.py" ]]; then
-    cp "dusky_main.py" "$ENV_DIR/"
+if [[ -f "$SCRIPT_DIR/dusky_main.py" ]]; then
+    cp "$SCRIPT_DIR/dusky_main.py" "$ENV_DIR/"
     echo ":: dusky_main.py deployed."
 else
     echo ":: ERROR: dusky_main.py not found in current directory."
@@ -54,11 +55,11 @@ if [[ ! -f "$MODEL_DIR/voices.bin" ]]; then
     curl -L "$VOICES_URL" -o "$MODEL_DIR/voices.bin"
 fi
 
-echo ":: Generating V30 Smart Trigger..."
+echo ":: Generating V31 Smart Trigger..."
 cat << 'EOF' > "$TARGET_TRIGGER"
 #!/usr/bin/env bash
-# Dusky Kokoro Trigger V30
-# Features: Process Verification, Hard Kill, Debug Recovery
+# Dusky Kokoro Trigger V31
+# Features: Process Verification, Hard Kill, Debug Recovery, Cold Boot Fix
 
 readonly APP_DIR="$HOME/contained_apps/uv/dusky_kokoro"
 readonly PID_FILE="/tmp/dusky_kokoro.pid"
@@ -138,8 +139,12 @@ start_daemon() {
         nohup uv run dusky_main.py --daemon > "$DAEMON_LOG" 2>&1 &
     fi
 
-    # Wait for daemon ready (max 5s)
-    for _ in {1..50}; do
+    # IMMEDIATE PID LOCK: Prevents double-start during cold boot
+    local daemon_pid=$!
+    echo "$daemon_pid" > "$PID_FILE"
+
+    # Wait for daemon ready (max 30s for Cold Boot CUDA init)
+    for _ in {1..300}; do
         if [[ -f "$READY_FILE" ]]; then
             if [[ "$debug_mode" == "true" ]]; then
                 echo ":: Daemon Ready. Tailing debug log (Ctrl+C to detach)..."
@@ -147,10 +152,17 @@ start_daemon() {
             fi
             return 0
         fi
+        
+        # Fast Fail: If python crashed during import, stop waiting
+        if ! kill -0 "$daemon_pid" 2>/dev/null; then
+            echo ":: ERROR: Daemon process died during startup. Check: $DAEMON_LOG"
+            notify "Kokoro Failed" "Daemon crashed during startup."
+            return 1
+        fi
         sleep 0.1
     done
 
-    echo ":: ERROR: Daemon start timeout (5s)."
+    echo ":: ERROR: Daemon start timeout (30s)."
     notify "Kokoro Failed" "Daemon start timeout."
     return 1
 }
@@ -246,8 +258,28 @@ if ! is_running; then
     fi
 fi
 
-# Send Clipboard
-INPUT_TEXT=$(timeout 0.5 wl-paste 2>/dev/null || true)
+# SECONDARY GATE: Handle the case where daemon is running but not yet ready
+if [[ ! -f "$READY_FILE" ]]; then
+    for _ in {1..300}; do
+        if [[ -f "$READY_FILE" ]]; then
+            break
+        fi
+        if ! is_running; then
+            echo ":: ERROR: Daemon died while waiting for readiness."
+            notify "Kokoro Failed" "Daemon died during startup."
+            exit 1
+        fi
+        sleep 0.1
+    done
+    if [[ ! -f "$READY_FILE" ]]; then
+        echo ":: ERROR: Daemon readiness timeout (30s)."
+        notify "Kokoro Failed" "Daemon not ready."
+        exit 1
+    fi
+fi
+
+# Send Clipboard (Increased timeout for system load)
+INPUT_TEXT=$(timeout 2 wl-paste 2>/dev/null || true)
 if [[ -n "$INPUT_TEXT" ]]; then
     CLEAN_TEXT=$(printf '%s' "$INPUT_TEXT" | tr '\n' ' ')
 
